@@ -78,3 +78,30 @@ final class PoseMatcherTests: XCTestCase {
         XCTAssertFalse(state.all.contains { $0.id.hasPrefix("posegoal.") })
     }
 }
+
+final class TiltDirectionTests: XCTestCase {
+    private func snap(roll: Double) -> FrameSnapshot {
+        Fixture.snapshot(Fixture.person(top: 0.08, head: 0.16, roll: roll))
+    }
+
+    func testHeadTiltIsMeasuredFromTheEyeLine() throws {
+        let tilt = try XCTUnwrap(snap(roll: 10).face?.headTilt(aspect: 0.75))
+        XCTAssertEqual(tilt, 10, accuracy: 0.5)
+    }
+
+    func testTiltInstructionsNameTheSubjectsSide() {
+        // Head leaning toward the frame's right = the subject's own left.
+        XCTAssertEqual(PoseCheck.headTilt.instruction("x", snap(roll: 2)), "Tilt your head slightly toward your left shoulder")
+        XCTAssertEqual(PoseCheck.headTilt.instruction("x", snap(roll: -2)), "Tilt your head slightly toward your right shoulder")
+        XCTAssertEqual(PoseCheck.headTilt.instruction("x", snap(roll: 0)), "Tilt your head slightly toward your right shoulder")
+        XCTAssertEqual(PoseCheck.headTilt.instruction("x", snap(roll: 22)), "Too far — tilt back toward your right shoulder")
+        let advice = PoseAdvisor().evaluate(snap(roll: -22), metrics: nil, target: .halfBody)
+        XCTAssertTrue(advice.contains { $0.message == "Straighten your head — tilt back toward your left shoulder" })
+    }
+
+    func testPhoneLevelSaysWhichWay() {
+        let s = Fixture.snapshot(Fixture.person(top: 0.08, head: 0.3), roll: 8)
+        let issues = CameraAngleAdvisor().evaluate(s, metrics: SubjectMetrics(snapshot: s), target: .halfBody)
+        XCTAssertTrue(issues.contains { $0.message == "Level the phone — turn it slightly left" })
+    }
+}

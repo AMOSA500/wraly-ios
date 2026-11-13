@@ -31,6 +31,17 @@ public enum PoseCheck: String, Sendable, CaseIterable {
     case footForward       // one foot clearly ahead of the other
     case seated            // thighs foreshortened / horizontal
 
+    /// The instruction to give for this check right now — adds which side for tilts.
+    public func instruction(_ say: String, _ s: FrameSnapshot) -> String {
+        guard self == .headTilt, let tilt = s.face?.headTilt(aspect: max(s.camera.aspect, 0.1)) else { return say }
+        if abs(tilt) > 15 {
+            return "Too far — tilt back toward \(FaceReading.subjectSide(towardFrameRight: tilt < 0)) shoulder"
+        }
+        // Keep going the way they already lean; otherwise start toward their right shoulder.
+        let towardFrameRight = abs(tilt) >= 1.5 ? tilt > 0 : false
+        return "Tilt your head slightly toward \(FaceReading.subjectSide(towardFrameRight: towardFrameRight)) shoulder"
+    }
+
     public static let squareRatio = 2.1
     public static let turnedRange = 1.15...1.95
     public static let profileRatio = 1.3
@@ -74,8 +85,8 @@ public enum PoseCheck: String, Sendable, CaseIterable {
             return (-14...10).contains(pitch) ? .met : .notMet
 
         case .headTilt:
-            guard let roll = face?.rollDegrees else { return .unknown }
-            return (4...15).contains(abs(roll)) ? .met : .notMet
+            guard let tilt = face?.headTilt(aspect: aspect) else { return .unknown }
+            return (4...15).contains(abs(tilt)) ? .met : .notMet
 
         case .shouldersRelaxed:
             guard let face, let headY, let sm = p?.shoulderMid else { return .unknown }

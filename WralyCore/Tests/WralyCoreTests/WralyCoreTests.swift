@@ -16,8 +16,10 @@ enum Fixture {
         var face = FaceReading(box: Rect2(x: x - boxW / 2, y: top + boxH * 0.22, width: boxW, height: boxH))
         face.rollDegrees = roll; face.yawDegrees = yaw; face.pitchDegrees = pitch
         let eyeY = face.box.minY + boxH * 0.4
-        face.leftPupil = Point2(x - boxW * 0.2, eyeY)
-        face.rightPupil = Point2(x + boxW * 0.2, eyeY)
+        // Eye line follows `roll` (positive = head leaning toward the frame's right).
+        let halfDrop = tan(roll * .pi / 180) * boxW * 0.2 * 0.75
+        face.leftPupil = Point2(x - boxW * 0.2, eyeY - halfDrop)
+        face.rightPupil = Point2(x + boxW * 0.2, eyeY + halfDrop)
         face.leftEyeAspect = eyesOpen ? 0.3 : 0.08
         face.rightEyeAspect = eyesOpen ? 0.3 : 0.08
         face.captureQuality = 0.7

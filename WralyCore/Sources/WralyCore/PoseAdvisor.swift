@@ -13,9 +13,10 @@ public struct PoseAdvisor: Sendable {
 
         // ---------------- Head ----------------
         if let face = s.face {
-            if let roll = face.rollDegrees, abs(roll) > 16 {
+            if let tilt = face.headTilt(aspect: aspect), abs(tilt) > 16 {
+                let back = FaceReading.subjectSide(towardFrameRight: tilt < 0)
                 out.append(Guidance("pose.headTiltTooMuch", .pose, .fix, .subject,
-                                    "Straighten your head a little",
+                                    "Straighten your head — tilt back toward \(back) shoulder",
                                     reason: "A slight tilt (5–10°) looks relaxed; much more looks quizzical.",
                                     cue: nil))
             }
@@ -126,7 +127,7 @@ public struct PoseAdvisor: Sendable {
 
         // Headshot polish once nothing else is wrong.
         if out.isEmpty, shot == .headshot || shot == .headAndShoulders, let face = s.face {
-            if let roll = face.rollDegrees, abs(roll) < 2.5 {
+            if let tilt = face.headTilt(aspect: aspect), abs(tilt) < 2.5 {
                 out.append(Guidance("pose.jawline", .pose, .tip, .subject,
                                     "Push your forehead toward me, then chin down a touch",
                                     reason: "The \"turtle\" trick: extending the face forward stretches the skin under the jaw and defines the jawline on camera.",

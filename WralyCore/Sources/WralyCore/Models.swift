@@ -114,6 +114,23 @@ public struct FaceReading: Equatable, Sendable {
         return box.minY + box.height * 0.40
     }
 
+    /// Sideways head tilt in degrees. Positive = top of the head leaning toward the
+    /// frame's right, which (back camera, subject facing the lens) is the subject's
+    /// own LEFT shoulder. Measured from the eye line when both pupils are found.
+    public func headTilt(aspect: Double) -> Double? {
+        if let l = leftPupil, let r = rightPupil {
+            let (a, b) = l.x <= r.x ? (l, r) : (r, l)
+            let dx = b.x - a.x
+            if dx > 0.005 { return atan2((b.y - a.y) / max(aspect, 0.1), dx) * 180 / .pi }
+        }
+        return rollDegrees
+    }
+
+    /// "your left" / "your right" for a direction in frame terms, from the subject's point of view.
+    public static func subjectSide(towardFrameRight: Bool) -> String {
+        towardFrameRight ? "your left" : "your right"
+    }
+
     /// Estimated crown (top of the skull incl. hair). Face boxes stop at the hairline.
     public var crownY: Double { box.minY - box.height * 0.22 }
 

@@ -36,7 +36,7 @@ public struct CameraAngleAdvisor: Sendable {
         // Level. Even 2° of roll reads as a crooked horizon on walls and doors.
         if abs(att.rollDegrees) > 2.5 {
             out.append(Guidance("angle.level", .cameraAngle, abs(att.rollDegrees) > 6 ? .fix : .tip, .photographer,
-                                "Level the phone",
+                                att.rollDegrees > 0 ? "Level the phone — turn it slightly left" : "Level the phone — turn it slightly right",
                                 reason: "A tilted horizon makes the whole picture feel off unless it's an obvious creative choice (>15°).",
                                 cue: att.rollDegrees > 0 ? .rotateCounterClockwise : .rotateClockwise))
         }

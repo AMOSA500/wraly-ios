@@ -102,7 +102,7 @@ public final class GuidanceEngine {
         var (issues, metrics, shot) = evaluate(s)
         let progress = poseMatcher.update(s, metrics: metrics)
         if let progress, let step = progress.nextStep, s.personCount > 0 {
-            issues.append(Guidance("posegoal.\(step.id)", .pose, .fix, .subject, step.step.say,
+            issues.append(Guidance("posegoal.\(step.id)", .pose, .fix, .subject, step.step.check.instruction(step.step.say, s),
                                    reason: "\(progress.recipe.name): \(progress.recipe.summary)"))
             issues.sort(by: Guidance.priority)
         }
