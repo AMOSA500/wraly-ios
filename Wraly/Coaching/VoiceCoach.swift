@@ -14,6 +14,10 @@ final class VoiceCoach {
     var enabled = true
     /// Speak instructions meant for the photographer too (otherwise only subject-facing ones).
     var speakPhotographerCues = false
+    /// A specific voice, or nil to follow the iPhone's Spoken Content voice.
+    var voiceIdentifier: String?
+    /// Multiplier on the default speaking rate.
+    var rate: Float = 1.05
 
     init() {
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .voicePrompt, options: [.mixWithOthers, .duckOthers])
@@ -31,12 +35,26 @@ final class VoiceCoach {
 
     func say(_ text: String) {
         guard enabled else { return }
+        speak(text, voice: voiceIdentifier, rate: rate)
+        lastSpokenAt = Date()
+    }
+
+    /// Plays a sample in the given voice (works even when voice coaching is off).
+    func preview(voice id: String?, rate: Float) {
+        speak("Turn your body a little to the side, and look back at me. Perfect, hold it.", voice: id, rate: rate)
+    }
+
+    private func speak(_ text: String, voice id: String?, rate: Float) {
         if synth.isSpeaking { synth.stopSpeaking(at: .word) }
         let u = AVSpeechUtterance(string: text.replacingOccurrences(of: "—", with: ","))
-        u.rate = AVSpeechUtteranceDefaultSpeechRate * 1.05
-        u.prefersAssistiveTechnologySettings = true
+        u.rate = min(AVSpeechUtteranceMaximumSpeechRate, AVSpeechUtteranceDefaultSpeechRate * rate)
+        if let id, let v = AVSpeechSynthesisVoice(identifier: id) {
+            u.voice = v
+            u.prefersAssistiveTechnologySettings = false
+        } else {
+            u.prefersAssistiveTechnologySettings = true
+        }
         synth.speak(u)
-        lastSpokenAt = Date()
     }
 
     func ready() { success.notificationOccurred(.success) }

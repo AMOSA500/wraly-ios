@@ -76,6 +76,11 @@ struct SettingsSheet: View {
             Form {
                 Toggle("Auto-capture when ready", isOn: $coach.autoCapture)
                 Toggle("Voice coaching", isOn: $coach.voiceEnabled)
+                NavigationLink {
+                    VoicePickerView()
+                } label: {
+                    LabeledContent("Voice", value: VoicePickerView.name(for: coach.voiceIdentifier))
+                }
                 Toggle("Show skeleton", isOn: $coach.showSkeleton)
                 Toggle("Rule-of-thirds grid", isOn: $coach.showGrid)
                 Section {

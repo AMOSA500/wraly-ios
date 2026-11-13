@@ -43,7 +43,7 @@ struct CameraScreen: View {
             .padding(.horizontal, 8)
         }
         .sheet(isPresented: $showDetails) { DetailsSheet().presentationDetents([.medium, .large]) }
-        .sheet(isPresented: $showSettings) { SettingsSheet().presentationDetents([.medium]) }
+        .sheet(isPresented: $showSettings) { SettingsSheet().presentationDetents([.medium, .large]) }
         .sheet(isPresented: $showPoses) { PosePickerSheet().presentationDetents([.medium, .large]) }
         .alert("Wraly", isPresented: Binding(get: { coach.errorMessage != nil }, set: { if !$0 { coach.errorMessage = nil } })) {
             Button("OK", role: .cancel) {}

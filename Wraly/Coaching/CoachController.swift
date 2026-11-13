@@ -46,6 +46,20 @@ final class CoachController {
     }
     var recommendedPoses: [PoseRecipe] { PoseLibrary.recommended(for: state.shot) }
     var voiceEnabled = true { didSet { voice.enabled = voiceEnabled } }
+    /// nil = the iPhone's Spoken Content voice.
+    var voiceIdentifier: String? = UserDefaults.standard.string(forKey: "voiceIdentifier") {
+        didSet {
+            voice.voiceIdentifier = voiceIdentifier
+            UserDefaults.standard.set(voiceIdentifier, forKey: "voiceIdentifier")
+        }
+    }
+    var voiceRate: Float = UserDefaults.standard.object(forKey: "voiceRate") as? Float ?? 1.05 {
+        didSet {
+            voice.rate = voiceRate
+            UserDefaults.standard.set(voiceRate, forKey: "voiceRate")
+        }
+    }
+    func previewVoice(_ id: String?) { voice.preview(voice: id, rate: voiceRate) }
     var showSkeleton = true
     var showGrid = true
 
@@ -78,6 +92,8 @@ final class CoachController {
             return
         }
         sensors.start()
+        voice.voiceIdentifier = voiceIdentifier
+        voice.rate = voiceRate
         let initialPose = poseRecipe
         analysisQueue { $0.engine.poseRecipe = initialPose }
 
