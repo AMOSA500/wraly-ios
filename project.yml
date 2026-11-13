@@ -10,7 +10,7 @@ settings:
     SWIFT_VERSION: "5.0"
     SWIFT_STRICT_CONCURRENCY: minimal
     TARGETED_DEVICE_FAMILY: "1"
-    DEVELOPMENT_TEAM: ""   # set your team ID to run on a device
+    DEVELOPMENT_TEAM: 24M2S8WW68
 packages:
   WralyCore:
     path: WralyCore
@@ -38,7 +38,7 @@ targets:
         NSMotionUsageDescription: Wraly uses motion sensors to keep your phone level and at the right angle.
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.wraly.app
+        PRODUCT_BUNDLE_IDENTIFIER: com.nafiuamosa.wraly
         CODE_SIGN_STYLE: Automatic
         ASSETCATALOG_COMPILER_APPICON_NAME: ""
   WralyCoreTests:
