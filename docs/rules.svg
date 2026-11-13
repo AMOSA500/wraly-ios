@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="620" viewBox="0 0 1280 620" role="img" aria-labelledby="t d">
+  <title id="t">Two rules Wraly enforces</title>
+  <desc id="d">Left: where to crop a person — between joints, never at the chin, waist, knees or ankles. Right: where to hold the phone for each shot — eye level for headshots, chest for half-body, waist to hip for full-body — never tilted down from the photographer's eye level.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0E1118"/><stop offset="1" stop-color="#1A1610"/>
+    </linearGradient>
+    <linearGradient id="skin" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFD9A8"/><stop offset="1" stop-color="#E8955A"/>
+    </linearGradient>
+    <g id="person">
+      <ellipse cx="0" cy="26" rx="20" ry="25"/>
+      <rect x="-7" y="48" width="14" height="18" rx="6"/>
+      <path d="M-38 74 C-28 60 28 60 38 74 L38 130 C35 150 32 165 28 178 L-28 178 C-32 165 -35 150 -38 130 Z"/>
+      <path d="M-28 175 L28 175 L20 318 L5 318 L0 220 L-5 318 L-20 318 Z"/>
+      <path d="M-38 76 L-50 130 L-40 172 L-32 170 L-38 132 L-30 90 Z"/>
+      <path d="M38 76 L50 130 L40 172 L32 170 L38 132 L30 90 Z"/>
+    </g>
+    <g id="phone">
+      <rect x="-11" y="-19" width="22" height="38" rx="5" fill="#1F2430" stroke="#FFFFFF" stroke-width="2"/>
+      <circle cx="0" cy="-11" r="3" fill="#FFFFFF"/>
+    </g>
+  </defs>
+
+  <rect width="1280" height="620" rx="24" fill="url(#bg)"/>
+
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+    <!-- ============ Panel 1: cropping ============ -->
+    <text x="64" y="70" font-size="13" font-weight="700" letter-spacing="3" fill="#FFB547">RULE 01</text>
+    <text x="64" y="104" font-size="30" font-weight="700" fill="#FFFFFF">Crop between joints</text>
+    <text x="64" y="132" font-size="16" fill="#8A91A3">A cut through a joint looks like an amputation.</text>
+
+    <g transform="translate(250 160) scale(1.25)" fill="url(#skin)"><use href="#person"/></g>
+
+    <!-- good crops -->
+    <g stroke="#4ADE80" stroke-width="2.5">
+      <line x1="150" y1="250" x2="350" y2="250"/>
+      <line x1="150" y1="300" x2="350" y2="300"/>
+      <line x1="150" y1="352" x2="350" y2="352"/>
+      <line x1="150" y1="437" x2="350" y2="437"/>
+      <line x1="150" y1="575" x2="350" y2="575"/>
+    </g>
+    <g font-size="15" fill="#4ADE80" font-weight="600">
+      <text x="364" y="255">✓ Headshot</text>
+      <text x="364" y="305">✓ Head &amp; shoulders</text>
+      <text x="364" y="357">✓ Half body</text>
+      <text x="364" y="442">✓ Three-quarter (mid-thigh)</text>
+      <text x="364" y="580">✓ Full body + a little floor</text>
+    </g>
+    <!-- bad crops -->
+    <g stroke="#F87171" stroke-width="2" stroke-dasharray="6 6">
+      <line x1="150" y1="226" x2="350" y2="226"/>
+      <line x1="150" y1="381" x2="350" y2="381"/>
+      <line x1="150" y1="475" x2="350" y2="475"/>
+      <line x1="150" y1="547" x2="350" y2="547"/>
+    </g>
+    <g font-size="14" fill="#F87171" text-anchor="end">
+      <text x="140" y="231">chin ✗</text>
+      <text x="140" y="386">waist ✗</text>
+      <text x="140" y="480">knees ✗</text>
+      <text x="140" y="552">ankles ✗</text>
+    </g>
+
+    <line x1="640" y1="60" x2="640" y2="580" stroke="#FFFFFF" stroke-opacity="0.08" stroke-width="2"/>
+
+    <!-- ============ Panel 2: lens height ============ -->
+    <text x="700" y="70" font-size="13" font-weight="700" letter-spacing="3" fill="#FFB547">RULE 02</text>
+    <text x="700" y="104" font-size="30" font-weight="700" fill="#FFFFFF">Lens height shapes the body</text>
+    <text x="700" y="132" font-size="16" fill="#8A91A3">Whatever is closest to the lens looks biggest.</text>
+
+    <g transform="translate(1110 160) scale(1.25)" fill="url(#skin)"><use href="#person"/></g>
+
+    <!-- sight lines: lens height → body -->
+    <g stroke-width="1.5" stroke-dasharray="4 6" stroke="#4ADE80">
+      <line x1="1012" y1="190" x2="1078" y2="190"/>
+      <line x1="1012" y1="285" x2="1072" y2="285"/>
+      <line x1="1012" y1="395" x2="1072" y2="395"/>
+    </g>
+    <g transform="translate(1000 190)"><use href="#phone"/></g>
+    <g transform="translate(1000 285)"><use href="#phone"/></g>
+    <g transform="translate(1000 395)"><use href="#phone"/></g>
+    <g transform="translate(740 465) rotate(-35)"><use href="#phone"/></g>
+    <g stroke="#F87171" stroke-width="3" stroke-linecap="round">
+      <line x1="722" y1="447" x2="758" y2="483"/><line x1="758" y1="447" x2="722" y2="483"/>
+    </g>
+
+    <g font-size="15" font-weight="600" text-anchor="end">
+      <text x="975" y="186" fill="#4ADE80">Headshot</text>
+      <text x="975" y="205" fill="#8A91A3" font-weight="400">eye level</text>
+      <text x="975" y="281" fill="#4ADE80">Half body</text>
+      <text x="975" y="300" fill="#8A91A3" font-weight="400">chest</text>
+      <text x="975" y="391" fill="#4ADE80">Full body</text>
+      <text x="975" y="410" fill="#8A91A3" font-weight="400">waist to hip, upright</text>
+    </g>
+    <g font-size="15">
+      <text x="782" y="460" fill="#F87171" font-weight="600">Not this</text>
+      <text x="782" y="479" fill="#8A91A3">your eye level, tilted</text>
+      <text x="700" y="527" fill="#F87171" font-weight="600">Tilting down = big head, short legs.</text>
+      <text x="700" y="549" fill="#8A91A3">Wraly tells you how many cm to lower</text>
+      <text x="700" y="570" fill="#8A91A3">the phone — no tilting.</text>
+    </g>
+  </g>
+</svg>
