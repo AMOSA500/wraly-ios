@@ -60,21 +60,58 @@ final class PhotoCaptureProcessor: NSObject, AVCapturePhotoCaptureDelegate {
 enum BestShotPicker {
     static func pick(_ frames: [Data]) -> (Data, String) {
         guard frames.count > 1 else { return (frames[0], "single frame") }
+        let images = frames.map(thumbnail)
         var best: (data: Data, score: Double, eyes: Bool)?
-        for data in frames {
-            guard let image = thumbnail(data) else { continue }
+        var sawFace = false
+        for (data, image) in zip(frames, images) {
+            guard let image else { continue }
             let handler = VNImageRequestHandler(cgImage: image, orientation: orientation(data))
             let landmarks = VNDetectFaceLandmarksRequest()
             let quality = VNDetectFaceCaptureQualityRequest()
             try? handler.perform([landmarks, quality])
             let face = (quality.results ?? []).max { ($0.faceCaptureQuality ?? 0) < ($1.faceCaptureQuality ?? 0) }
+            if face != nil { sawFace = true }
             let q = Double(face?.faceCaptureQuality ?? 0)
             let eyes = (landmarks.results ?? []).first.map(eyesOpen) ?? true
             let score = q + (eyes ? 1 : 0)
             if best == nil || score > best!.score { best = (data, score, eyes) }
         }
+        // No faces anywhere (scenery): keep the frame with the crispest detail.
+        if !sawFace {
+            let scored = zip(frames, images).compactMap { d, img in img.map { (d, sharpness($0)) } }
+            if let sharpest = scored.max(by: { $0.1 < $1.1 }) {
+                return (sharpest.0, "sharpest of \(frames.count)")
+            }
+        }
         guard let best else { return (frames[0], "first frame") }
         return (best.data, best.eyes ? "best of \(frames.count): eyes open, sharpest face" : "best of \(frames.count)")
+    }
+
+    /// Variance of the Laplacian on a small greyscale copy: higher = more fine detail,
+    /// so less hand shake and better focus. Standard blur measure.
+    static func sharpness(_ image: CGImage) -> Double {
+        let scale = min(1, 640 / Double(max(image.width, image.height)))
+        let w = max(3, Int(Double(image.width) * scale)), h = max(3, Int(Double(image.height) * scale))
+        var px = [UInt8](repeating: 0, count: w * h)
+        let ok: Bool = px.withUnsafeMutableBytes { buf in
+            guard let ctx = CGContext(data: buf.baseAddress, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w,
+                                      space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue) else { return false }
+            ctx.interpolationQuality = .medium
+            ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+            return true
+        }
+        guard ok else { return 0 }
+        var sum = 0.0, sumSq = 0.0
+        for y in 1..<(h - 1) {
+            for x in 1..<(w - 1) {
+                let i = y * w + x
+                let lap = Double(px[i - 1]) + Double(px[i + 1]) + Double(px[i - w]) + Double(px[i + w]) - 4 * Double(px[i])
+                sum += lap; sumSq += lap * lap
+            }
+        }
+        let n = Double((w - 2) * (h - 2))
+        let mean = sum / n
+        return sumSq / n - mean * mean
     }
 
     static func eyesOpen(_ face: VNFaceObservation) -> Bool {

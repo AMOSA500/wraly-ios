@@ -126,10 +126,10 @@ public struct CapturePlanner: Sendable {
         var p = CapturePlan.neutral
         let f = s.camera.equivalentFocalLength
         var shutter = 1.0 / (2 * max(f, 13))
+        p.burstCount = 3   // handheld: shoot three, keep the sharpest
         if let ev = s.light?.ev100, ev < 3 {
             shutter = max(shutter, 1.0 / 15)
-            p.burstCount = 3
-            p.notes.append("Dim scene: up to 1/15 s, keeping the sharpest of 3")
+            p.notes.append("Dim scene: up to 1/15 s")
         }
         p.maxExposureSeconds = shutter
         p.maxISO = 1600
