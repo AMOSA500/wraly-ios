@@ -1,0 +1,156 @@
+import XCTest
+@testable import WralyCore
+
+final class PoseCheckTests: XCTestCase {
+    private func snap(ratio: Double, yaw: Double = 0, extra: [Joint: Point2] = [:]) -> FrameSnapshot {
+        var p = Fixture.person(top: 0.08, head: 0.16, yaw: yaw, shoulderWidthInFaces: ratio)
+        for (k, v) in extra { p.1.joints[k] = v }
+        return Fixture.snapshot(p)
+    }
+
+    func testShoulderTurn() {
+        let turned = snap(ratio: 1.6), square = snap(ratio: 2.4)
+        XCTAssertEqual(PoseCheck.bodyTurned.evaluate(turned, metrics: SubjectMetrics(snapshot: turned)), .met)
+        XCTAssertEqual(PoseCheck.bodySquare.evaluate(turned, metrics: nil), .notMet)
+        XCTAssertEqual(PoseCheck.bodySquare.evaluate(square, metrics: nil), .met)
+        XCTAssertEqual(PoseCheck.bodyTurned.evaluate(square, metrics: nil), .notMet)
+        XCTAssertEqual(PoseCheck.bodyProfile.evaluate(snap(ratio: 1.0), metrics: nil), .met)
+    }
+
+    func testFaceDirection() {
+        XCTAssertEqual(PoseCheck.faceToCamera.evaluate(snap(ratio: 2, yaw: 5), metrics: nil), .met)
+        XCTAssertEqual(PoseCheck.faceAway.evaluate(snap(ratio: 2, yaw: 35), metrics: nil), .met)
+        XCTAssertEqual(PoseCheck.faceToCamera.evaluate(snap(ratio: 2, yaw: 35), metrics: nil), .notMet)
+    }
+
+    func testHandOnHip() {
+        let base = snap(ratio: 2)
+        XCTAssertEqual(PoseCheck.handOnHip.evaluate(base, metrics: nil), .unknown, "no wrists visible")
+        let hip = base.pose![.leftHip]!
+        let onHip = snap(ratio: 2, extra: [.leftWrist: Point2(hip.x - 0.01, hip.y - 0.01)])
+        XCTAssertEqual(PoseCheck.handOnHip.evaluate(onHip, metrics: SubjectMetrics(snapshot: onHip)), .met)
+        let hanging = snap(ratio: 2, extra: [.leftWrist: Point2(hip.x - 0.06, hip.y + 0.12)])
+        XCTAssertEqual(PoseCheck.handOnHip.evaluate(hanging, metrics: SubjectMetrics(snapshot: hanging)), .notMet)
+    }
+
+    func testArmsCrossed() {
+        let base = snap(ratio: 2)
+        let ls = base.pose![.leftShoulder]!, rs = base.pose![.rightShoulder]!
+        let chestY = ls.y + 0.08
+        let crossed = snap(ratio: 2, extra: [.leftWrist: Point2(rs.x - 0.01, chestY), .rightWrist: Point2(ls.x + 0.01, chestY)])
+        XCTAssertEqual(PoseCheck.armsCrossed.evaluate(crossed, metrics: SubjectMetrics(snapshot: crossed)), .met)
+        let down = snap(ratio: 2, extra: [.leftWrist: Point2(ls.x, chestY), .rightWrist: Point2(rs.x, chestY)])
+        XCTAssertEqual(PoseCheck.armsCrossed.evaluate(down, metrics: SubjectMetrics(snapshot: down)), .notMet)
+    }
+
+    func testRecommendationsSuitTheShot() {
+        XCTAssertTrue(PoseLibrary.recommended(for: .headshot).allSatisfy { $0.shots.contains(.headshot) })
+        XCTAssertFalse(PoseLibrary.recommended(for: .headshot).contains { $0.id == "stance" })
+        let full = PoseLibrary.recommended(for: .fullBody)
+        XCTAssertEqual(PoseLibrary.next(after: full.last, for: .fullBody), full.first, "wraps around")
+    }
+}
+
+final class PoseMatcherTests: XCTestCase {
+    func testStepsMustHoldBeforeTicking() throws {
+        let matcher = PoseMatcher(recipe: PoseLibrary.recipe(id: "classic"))
+        let p = Fixture.person(top: 0.08, head: 0.16, shoulderWidthInFaces: 1.6)
+        let first = try XCTUnwrap(matcher.update(Fixture.snapshot(p, t: 0), metrics: nil))
+        XCTAssertFalse(first.matched, "nothing confirmed on the first frame")
+        let later = try XCTUnwrap(matcher.update(Fixture.snapshot(p, t: 0.5), metrics: nil))
+        XCTAssertTrue(later.matched)
+    }
+
+    func testEngineAsksForTheNextStepAndHoldsCapture() {
+        let engine = GuidanceEngine(targetShot: .halfBody)
+        engine.poseRecipe = PoseLibrary.recipe(id: "classic")
+        let square = Fixture.person(top: 0.08, head: 0.16, shoulderWidthInFaces: 2.4)
+        var state = CoachState.empty
+        for i in 0..<20 { state = engine.update(Fixture.snapshot(square, t: Double(i) * 0.1)) }
+        XCTAssertEqual(state.pose?.nextStep?.id, "classic.turn")
+        XCTAssertTrue(state.all.contains { $0.id == "posegoal.classic.turn" })
+        XCTAssertFalse(state.readyToCapture)
+        XCTAssertFalse(state.all.contains { $0.id == "pose.squareShoulders" }, "generic pose tips are replaced")
+
+        let turned = Fixture.person(top: 0.08, head: 0.16, shoulderWidthInFaces: 1.6)
+        for i in 20..<30 { state = engine.update(Fixture.snapshot(turned, t: Double(i) * 0.1)) }
+        XCTAssertEqual(state.pose?.matched, true)
+        XCTAssertFalse(state.all.contains { $0.id.hasPrefix("posegoal.") })
+    }
+}
+
+final class TiltDirectionTests: XCTestCase {
+    private func snap(roll: Double) -> FrameSnapshot {
+        Fixture.snapshot(Fixture.person(top: 0.08, head: 0.16, roll: roll))
+    }
+
+    func testHeadTiltIsMeasuredFromTheEyeLine() throws {
+        let tilt = try XCTUnwrap(snap(roll: 10).face?.headTilt(aspect: 0.75))
+        XCTAssertEqual(tilt, 10, accuracy: 0.5)
+    }
+
+    func testTiltInstructionsNameTheSubjectsSide() {
+        // Head leaning toward the frame's right = the subject's own left.
+        XCTAssertEqual(PoseCheck.headTilt.instruction("x", snap(roll: 2)), "Tilt your head slightly toward your left shoulder")
+        XCTAssertEqual(PoseCheck.headTilt.instruction("x", snap(roll: -2)), "Tilt your head slightly toward your right shoulder")
+        XCTAssertEqual(PoseCheck.headTilt.instruction("x", snap(roll: 0)), "Tilt your head slightly toward your right shoulder")
+        XCTAssertEqual(PoseCheck.headTilt.instruction("x", snap(roll: 22)), "Too far — tilt back toward your right shoulder")
+        let advice = PoseAdvisor().evaluate(snap(roll: -22), metrics: nil, target: .halfBody)
+        XCTAssertTrue(advice.contains { $0.message == "Straighten your head — tilt back toward your left shoulder" })
+    }
+
+    func testPhoneLevelSaysWhichWay() {
+        let s = Fixture.snapshot(Fixture.person(top: 0.08, head: 0.3), roll: 8)
+        let issues = CameraAngleAdvisor().evaluate(s, metrics: SubjectMetrics(snapshot: s), target: .halfBody)
+        XCTAssertTrue(issues.contains { $0.message == "Level the phone — turn it slightly left" })
+    }
+}
+
+final class HeadroomAndModeTests: XCTestCase {
+    private func headroomMessage(_ s: FrameSnapshot, _ shot: ShotType) -> String? {
+        GuidanceEngine(targetShot: shot).evaluate(s).issues.first { $0.id == "frame.headroom.tooMuch" }?.message
+    }
+
+    func testHeadroomFixForCloseShotIsATilt() {
+        let s = Fixture.snapshot(Fixture.person(top: 0.3, head: 0.25))
+        XCTAssertEqual(headroomMessage(s, .halfBody), "Too much space above — tilt down slightly")
+    }
+
+    func testHeadroomFixWhenLensIsHighIsLowerThePhone() {
+        // Phone tipped down from above: the lens-height line sits near the crown.
+        let s = Fixture.snapshot(Fixture.person(top: 0.3, head: 0.25), pitch: -12)
+        XCTAssertEqual(headroomMessage(s, .halfBody), "Too much space above — lower the phone")
+    }
+
+    func testSceneryNeedsNoPerson() {
+        let engine = GuidanceEngine()
+        engine.mode = .scenery
+        let empty = FrameSnapshot(timestamp: 0, personCount: 0,
+                                  attitude: DeviceAttitude(pitchDegrees: 0, rollDegrees: 0),
+                                  camera: Fixture.camera)
+        var state = CoachState.empty
+        for i in 0..<12 { state = engine.update(FrameSnapshot(timestamp: Double(i) * 0.1, personCount: 0,
+                                                             attitude: empty.attitude, camera: Fixture.camera)) }
+        XCTAssertFalse(state.all.contains { $0.id == "subject.none" })
+        XCTAssertTrue(state.readyToCapture)
+        XCTAssertNil(state.pose)
+    }
+
+    func testSceneryAsksToLevelTheHorizon() {
+        let engine = GuidanceEngine()
+        engine.mode = .scenery
+        let s = FrameSnapshot(timestamp: 0, personCount: 0,
+                              attitude: DeviceAttitude(pitchDegrees: 0, rollDegrees: 4), camera: Fixture.camera)
+        XCTAssertTrue(engine.evaluate(s).issues.contains { $0.message == "Level the horizon — turn it slightly left" })
+    }
+
+    func testEnvironmentalPutsSubjectOnAThird() throws {
+        let engine = GuidanceEngine()
+        engine.mode = .environmental
+        // Small, centred, looking at the camera.
+        let s = Fixture.snapshot(Fixture.person(top: 0.3, head: 0.06, x: 0.5))
+        let ids = engine.evaluate(s).issues.map(\.id)
+        XCTAssertTrue(ids.contains("env.thirds"))
+        XCTAssertFalse(ids.contains("frame.tooLoose"), "small is fine here")
+    }
+}
