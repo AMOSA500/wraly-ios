@@ -195,19 +195,26 @@ private struct ZoomStops: View {
 
 private struct BottomBar: View {
     @Environment(CoachController.self) private var coach
+    @Environment(\.openURL) private var openURL
     @Binding var showDetails: Bool
 
     var body: some View {
         HStack {
-            Group {
-                if let img = coach.lastPhoto?.preview {
-                    Image(uiImage: img).resizable().scaledToFill()
-                } else {
-                    Color.white.opacity(0.08)
+            // Opens the Photos app, where the newest photo is first in Recents.
+            Button { openURL(URL(string: "photos-redirect://")!) } label: {
+                Group {
+                    if let img = coach.lastPhoto?.preview {
+                        Image(uiImage: img).resizable().scaledToFill()
+                    } else {
+                        Color.white.opacity(0.08)
+                    }
                 }
+                .frame(width: 52, height: 52)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
             }
-            .frame(width: 52, height: 52)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .disabled(coach.lastPhoto == nil)
+            .accessibilityLabel("Last photo")
+            .accessibilityHint("Opens the Photos app")
 
             Spacer()
 
