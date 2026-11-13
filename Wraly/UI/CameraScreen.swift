@@ -5,6 +5,7 @@ struct CameraScreen: View {
     @Environment(CoachController.self) private var coach
     @State private var showDetails = false
     @State private var showSettings = false
+    @State private var showPoses = false
 
     var body: some View {
         ZStack {
@@ -25,12 +26,16 @@ struct CameraScreen: View {
                         .padding(10)
                         .onTapGesture { showDetails = true }
                 }
-                .overlay(alignment: .topLeading) {
-                    Text(coach.exposureReadout)
-                        .font(.caption2.monospacedDigit())
-                        .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(.black.opacity(0.5), in: Capsule())
-                        .padding(8)
+                .overlay(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(coach.exposureReadout)
+                            .font(.caption2.monospacedDigit())
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(.black.opacity(0.5), in: Capsule())
+                        PoseCard(showPicker: $showPoses)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
                 }
                 ZoomStops()
                 BottomBar(showDetails: $showDetails)
@@ -39,6 +44,7 @@ struct CameraScreen: View {
         }
         .sheet(isPresented: $showDetails) { DetailsSheet().presentationDetents([.medium, .large]) }
         .sheet(isPresented: $showSettings) { SettingsSheet().presentationDetents([.medium]) }
+        .sheet(isPresented: $showPoses) { PosePickerSheet().presentationDetents([.medium, .large]) }
         .alert("Wraly", isPresented: Binding(get: { coach.errorMessage != nil }, set: { if !$0 { coach.errorMessage = nil } })) {
             Button("OK", role: .cancel) {}
         } message: { Text(coach.errorMessage ?? "") }

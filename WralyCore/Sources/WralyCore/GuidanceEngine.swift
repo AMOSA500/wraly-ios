@@ -13,6 +13,8 @@ public struct CoachState: Equatable, Sendable {
     public var metrics: SubjectMetrics?
     public var plan: CapturePlan
     public var shot: ShotType
+    /// Progress through the chosen pose, when the pose guide is on.
+    public var pose: PoseProgress? = nil
 
     public static let empty = CoachState(primary: nil, all: [], readiness: 0, readyToCapture: false,
                                          metrics: nil, plan: .neutral, shot: .halfBody)
@@ -40,6 +42,13 @@ public final class GuidanceEngine {
     public var tuning = Tuning()
     /// nil = automatic: coach whatever shot the photographer is already framing.
     public var targetShot: ShotType?
+    /// The pose the photographer is directing. While set, its next unconfirmed
+    /// step replaces the generic pose tips and holds auto-capture.
+    public var poseRecipe: PoseRecipe? {
+        get { poseMatcher.recipe }
+        set { poseMatcher.recipe = newValue }
+    }
+    private let poseMatcher = PoseMatcher()
 
     private let framing = FramingAdvisor()
     private let angle = CameraAngleAdvisor()
@@ -78,7 +87,9 @@ public final class GuidanceEngine {
             issues += framing.evaluate(s, metrics: metrics, target: shot)
         }
         issues += background.evaluate(s, metrics: metrics)
-        issues += pose.evaluate(s, metrics: metrics, target: shot)
+        if poseRecipe == nil {
+            issues += pose.evaluate(s, metrics: metrics, target: shot)
+        }
 
         // De-duplicate by id, keep priority order.
         var seen = Set<String>()
@@ -88,7 +99,13 @@ public final class GuidanceEngine {
 
     public func update(_ s: FrameSnapshot) -> CoachState {
         let now = s.timestamp
-        let (issues, metrics, shot) = evaluate(s)
+        var (issues, metrics, shot) = evaluate(s)
+        let progress = poseMatcher.update(s, metrics: metrics)
+        if let progress, let step = progress.nextStep, s.personCount > 0 {
+            issues.append(Guidance("posegoal.\(step.id)", .pose, .fix, .subject, step.step.say,
+                                   reason: "\(progress.recipe.name): \(progress.recipe.summary)"))
+            issues.sort(by: Guidance.priority)
+        }
 
         // Track persistence.
         let ids = Set(issues.map(\.id))
@@ -118,7 +135,7 @@ public final class GuidanceEngine {
 
         let plan = planner.plan(for: s, metrics: metrics, target: shot)
         return CoachState(primary: primary, all: established, readiness: readiness,
-                          readyToCapture: ready, metrics: metrics, plan: plan, shot: shot)
+                          readyToCapture: ready, metrics: metrics, plan: plan, shot: shot, pose: progress)
     }
 
     private func choosePrimary(_ issues: [Guidance], now: TimeInterval) -> Guidance? {

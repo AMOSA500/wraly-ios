@@ -21,11 +21,12 @@ final class VoiceCoach {
 
     func announce(_ g: Guidance?) {
         guard let g, g.id != lastSpokenID else { return }
+        let speakable = enabled && (g.audience == .subject || speakPhotographerCues || g.severity == .critical)
+        // Too soon after the last line: try again on a later frame rather than dropping it.
+        if speakable && Date().timeIntervalSince(lastSpokenAt) <= 2.2 { return }
         tick.impactOccurred(intensity: g.severity == .critical ? 1 : 0.5)
         lastSpokenID = g.id
-        guard enabled, g.audience == .subject || speakPhotographerCues || g.severity == .critical else { return }
-        guard Date().timeIntervalSince(lastSpokenAt) > 2.2 else { return }
-        say(g.message)
+        if speakable { say(g.message) }
     }
 
     func say(_ text: String) {

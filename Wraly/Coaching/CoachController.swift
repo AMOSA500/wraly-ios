@@ -28,6 +28,23 @@ final class CoachController {
         didSet { let t = targetShot; analysisQueue { $0.engine.targetShot = t; $0.engine.reset() } }
     }
     var autoCapture = true
+    /// Recommend poses and confirm the subject is in them before shooting.
+    var poseGuide = true {
+        didSet { poseRecipe = poseGuide ? PoseLibrary.recommended(for: state.shot).first : nil }
+    }
+    /// Move to the next recommended pose after each photo.
+    var autoNextPose = true
+    /// The pose being directed right now.
+    var poseRecipe: PoseRecipe? = PoseLibrary.recipe(id: "classic") {
+        didSet {
+            guard poseRecipe != oldValue else { return }
+            let r = poseRecipe
+            analysisQueue { $0.engine.poseRecipe = r }
+            poseWasMatched = false
+            voice.clear()
+        }
+    }
+    var recommendedPoses: [PoseRecipe] { PoseLibrary.recommended(for: state.shot) }
     var voiceEnabled = true { didSet { voice.enabled = voiceEnabled } }
     var showSkeleton = true
     var showGrid = true
@@ -40,6 +57,7 @@ final class CoachController {
     @ObservationIgnored private var lastCaptureAt = Date.distantPast
     @ObservationIgnored private var wasReady = false
     @ObservationIgnored private var started = false
+    @ObservationIgnored private var poseWasMatched = false
 
     func start() async {
         guard !started else { return }
@@ -60,6 +78,8 @@ final class CoachController {
             return
         }
         sensors.start()
+        let initialPose = poseRecipe
+        analysisQueue { $0.engine.poseRecipe = initialPose }
 
         let service = cameraService
         let sensors = sensors
@@ -97,7 +117,18 @@ final class CoachController {
         exposureReadout = readout
         voice.announce(coach.primary)
 
-        if coach.readyToCapture && !wasReady { voice.ready() }
+        // Keep the pose suited to the shot being framed.
+        if poseGuide, let r = poseRecipe, !r.shots.contains(coach.shot) {
+            poseRecipe = PoseLibrary.recommended(for: coach.shot).first
+        }
+        let matched = coach.pose?.matched ?? false
+        if matched && !poseWasMatched {
+            voice.ready()
+            if !autoCapture { voice.say("That's the pose") }
+        }
+        poseWasMatched = matched
+
+        if coach.readyToCapture && !wasReady && coach.pose == nil { voice.ready() }
         wasReady = coach.readyToCapture
 
         if autoCapture, coach.readyToCapture, !isCapturing, countdown == nil,
@@ -132,10 +163,26 @@ final class CoachController {
                 case .success(let photo):
                     self.lastPhoto = photo
                     self.voice.say("Got it")
+                    if self.poseGuide, self.autoNextPose { self.advancePoseAfterShot() }
                 case .failure(let error):
                     self.errorMessage = "Couldn't save photo: \(error.localizedDescription)"
                 }
             }
+        }
+    }
+
+    // MARK: Poses
+
+    func nextPose(_ step: Int = 1) {
+        poseRecipe = PoseLibrary.next(after: poseRecipe, for: state.shot, step: step)
+    }
+
+    private func advancePoseAfterShot() {
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(1200))
+            guard poseGuide else { return }
+            nextPose()
+            if let name = poseRecipe?.name { voice.say("Next pose: \(name)") }
         }
     }
 
