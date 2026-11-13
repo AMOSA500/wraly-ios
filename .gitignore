@@ -2,3 +2,5 @@
 .build/
 DerivedData/
 xcuserdata/
+build/
+Wraly/Resources/Info.plist

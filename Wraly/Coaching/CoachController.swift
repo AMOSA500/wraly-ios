@@ -12,7 +12,7 @@ final class CoachController {
     // MARK: UI state
     var permission: Permission = .unknown
     var state: CoachState = .empty
-    var joints: [Joint: Point2] = [:]
+    var joints: [WralyCore.Joint: Point2] = [:]
     var faceBox: Rect2?
     var attitude: DeviceAttitude?
     var camera = CameraInfo(equivalentFocalLength: 26, verticalFOV: 69, horizontalFOV: 54)

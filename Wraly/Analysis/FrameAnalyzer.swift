@@ -36,7 +36,7 @@ final class FrameAnalyzer {
     struct Output {
         var snapshot: FrameSnapshot
         /// For drawing: every joint of the main subject.
-        var joints: [Joint: Point2]
+        var joints: [WralyCore.Joint: Point2]
         var faceBox: Rect2?
     }
 
@@ -161,7 +161,7 @@ final class FrameAnalyzer {
         return Double((maxY - minY) / (maxX - minX))
     }
 
-    static let jointMap: [VNHumanBodyPoseObservation.JointName: Joint] = [
+    static let jointMap: [VNHumanBodyPoseObservation.JointName: WralyCore.Joint] = [
         .nose: .nose, .leftEye: .leftEye, .rightEye: .rightEye, .leftEar: .leftEar, .rightEar: .rightEar,
         .neck: .neck, .leftShoulder: .leftShoulder, .rightShoulder: .rightShoulder,
         .leftElbow: .leftElbow, .rightElbow: .rightElbow, .leftWrist: .leftWrist, .rightWrist: .rightWrist,
@@ -169,9 +169,9 @@ final class FrameAnalyzer {
         .leftKnee: .leftKnee, .rightKnee: .rightKnee, .leftAnkle: .leftAnkle, .rightAnkle: .rightAnkle,
     ]
 
-    static func joints(_ obs: VNHumanBodyPoseObservation) -> [Joint: Point2] {
+    static func joints(_ obs: VNHumanBodyPoseObservation) -> [WralyCore.Joint: Point2] {
         guard let points = try? obs.recognizedPoints(.all) else { return [:] }
-        var out: [Joint: Point2] = [:]
+        var out: [WralyCore.Joint: Point2] = [:]
         for (name, p) in points where p.confidence > 0.3 {
             if let j = jointMap[name] { out[j] = Point2(Double(p.location.x), 1 - Double(p.location.y)) }
         }

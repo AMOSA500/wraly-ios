@@ -55,10 +55,10 @@ private struct TargetBand: View {
 }
 
 private struct Skeleton: View {
-    let joints: [Joint: Point2]
+    let joints: [WralyCore.Joint: Point2]
     let size: CGSize
 
-    static let bones: [(Joint, Joint)] = [
+    static let bones: [(WralyCore.Joint, WralyCore.Joint)] = [
         (.leftShoulder, .rightShoulder), (.leftShoulder, .leftElbow), (.leftElbow, .leftWrist),
         (.rightShoulder, .rightElbow), (.rightElbow, .rightWrist), (.leftShoulder, .leftHip),
         (.rightShoulder, .rightHip), (.leftHip, .rightHip), (.leftHip, .leftKnee), (.leftKnee, .leftAnkle),
@@ -67,7 +67,7 @@ private struct Skeleton: View {
 
     var body: some View {
         Canvas { ctx, _ in
-            func pt(_ j: Joint) -> CGPoint? {
+            func pt(_ j: WralyCore.Joint) -> CGPoint? {
                 joints[j].map { CGPoint(x: $0.x * size.width, y: $0.y * size.height) }
             }
             var path = Path()
