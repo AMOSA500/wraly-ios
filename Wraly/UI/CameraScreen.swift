@@ -157,6 +157,8 @@ struct InstructionBanner: View {
         case .wipeLens: return "sparkles"
         case .wait: return "hourglass"
         case .turnAround: return "arrow.triangle.2.circlepath"
+        case .turnSideways: return "rectangle.landscape.rotate"
+        case .turnUpright: return "rectangle.portrait.rotate"
         }
     }
 }

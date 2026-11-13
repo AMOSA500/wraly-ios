@@ -46,6 +46,8 @@ final class FrameAnalyzer {
         frameIndex += 1
         let ts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
         let width = Double(CVPixelBufferGetWidth(pb)), height = Double(CVPixelBufferGetHeight(pb))
+        // Frames arrive upright for the way the phone is held, so sideways frames are wide.
+        let (gridW, gridH) = width > height ? (96, 72) : (72, 96)
 
         var requests: [VNRequest] = [poseRequest, faceRequest]
         let runSegmentation = frameIndex % 2 == 0
@@ -71,15 +73,17 @@ final class FrameAnalyzer {
         }
 
         if runSegmentation, let mask = segmentationRequest.results?.first?.pixelBuffer {
-            lastMask = LumaGrid.mask(from: mask, width: 72, height: 96)
+            lastMask = LumaGrid.mask(from: mask, width: gridW, height: gridH)
         }
         if runScene, let results = classifyRequest.results {
             sceneLabels = results.filter { $0.confidence > 0.3 }.prefix(6).map(\.identifier)
         }
 
         // ---- Pixels ----
-        let grid = LumaGrid(pixelBuffer: pb)
+        let grid = LumaGrid(pixelBuffer: pb, width: gridW, height: gridH)
         let stats = grid?.stats()
+        // A mask from before the phone was turned has the wrong shape.
+        if lastMask?.count != gridW * gridH { lastMask = nil }
         let regions = grid?.regions(person: lastMask, face: faceBox)
 
         var face: FaceReading?
@@ -141,7 +145,9 @@ final class FrameAnalyzer {
             pose: body == nil ? nil : BodyPose(joints: joints),
             face: face, light: light, background: background, lens: lens,
             attitude: attitude, camera: camera, depthDistance: nil, sun: sun)
-        return Output(snapshot: snapshot, joints: joints, faceBox: faceBox)
+        var snap = snapshot
+        snap.faces = faces.map { Self.rect($0.boundingBox) }
+        return Output(snapshot: snap, joints: joints, faceBox: faceBox)
     }
 
     // MARK: helpers

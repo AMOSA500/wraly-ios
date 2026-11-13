@@ -47,7 +47,10 @@ final class PhotoCaptureProcessor: NSObject, AVCapturePhotoCaptureDelegate {
             PhotoSaver.save(best) { result in
                 switch result {
                 case .success:
-                    self.completion(self.id, .success(CapturedPhoto(data: best, preview: UIImage(data: best)?.preparingThumbnail(of: CGSize(width: 240, height: 320)),
+                    let image = UIImage(data: best)
+                    let wide = (image?.size.width ?? 0) > (image?.size.height ?? 1)
+                    let thumb = image?.preparingThumbnail(of: wide ? CGSize(width: 320, height: 240) : CGSize(width: 240, height: 320))
+                    self.completion(self.id, .success(CapturedPhoto(data: best, preview: thumb,
                                                                     burstSize: frames.count, note: note)))
                 case .failure(let e):
                     self.completion(self.id, .failure(e))

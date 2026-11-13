@@ -43,6 +43,8 @@ public enum Cue: String, Sendable {
     case rotateClockwise, rotateCounterClockwise
     case zoomIn, zoomOut
     case wipeLens, wait, turnAround
+    /// Turn the phone sideways (landscape) or back upright.
+    case turnSideways, turnUpright
 }
 
 public struct Guidance: Identifiable, Equatable, Sendable {

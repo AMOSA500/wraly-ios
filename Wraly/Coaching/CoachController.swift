@@ -112,13 +112,17 @@ final class CoachController {
         cameraService.onFrame = { [weak self] buffer in
             // Analyse ~12 fps; drop frames while busy.
             guard worker.shouldAnalyse() else { return }
-            let info = service.cameraInfo()
+            // Follow the phone: sideways frames and photos when it's held sideways.
+            let held = sensors.attitude?.orientation ?? .portrait
+            service.setOrientation(held)
+            guard let orientation = service.orientation(of: buffer) else { worker.done(); return }
+            let info = service.cameraInfo(orientation: orientation)
             guard let out = worker.analyzer.analyze(buffer, device: service.device, camera: info,
                                                     attitude: sensors.attitude, sun: sensors.sun) else {
                 worker.done(); return
             }
             let coach = worker.engine.update(out.snapshot)
-            service.apply(coach.plan)
+            service.apply(coach.plan, orientation: orientation)
             let readout = Self.readout(service.device, info)
             worker.done()
             Task { @MainActor [weak self] in

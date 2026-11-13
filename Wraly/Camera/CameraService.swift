@@ -23,6 +23,8 @@ final class CameraService: NSObject, @unchecked Sendable {
 
     /// Device zoom factor that corresponds to the main 1× camera.
     private(set) var wideZoomFactor: CGFloat = 1
+    /// How frames and photos are currently rotated. Read and written on `videoQueue`.
+    private(set) var orientation: FrameOrientation = .portrait
     private var lastApplied: CapturePlan?
     private var lastAppliedAt: CFTimeInterval = 0
 
@@ -88,13 +90,55 @@ final class CameraService: NSObject, @unchecked Sendable {
         device.unlockForConfiguration()
     }
 
+    /// Rotate analysis frames and photos so they come out upright for the way the phone is held.
+    /// Call on `videoQueue`.
+    func setOrientation(_ o: FrameOrientation) {
+        guard o != orientation else { return }
+        orientation = o
+        let angle = Self.rotationAngle(o)
+        let outputs: [AVCaptureOutput] = [videoOutput, photoOutput]
+        sessionQueue.async {
+            for output in outputs {
+                if let c = output.connection(with: .video), c.isVideoRotationAngleSupported(angle) {
+                    c.videoRotationAngle = angle
+                }
+            }
+        }
+    }
+
+    /// The sensor's natural orientation is landscape with the phone's top on the left.
+    static func rotationAngle(_ o: FrameOrientation) -> CGFloat {
+        switch o {
+        case .portrait: return 90
+        case .landscapeCounterClockwise: return 0
+        case .landscapeClockwise: return 180
+        }
+    }
+
+    /// The orientation of an analysis frame, or nil while a rotation change is still in flight.
+    func orientation(of buffer: CMSampleBuffer) -> FrameOrientation? {
+        guard let pb = CMSampleBufferGetImageBuffer(buffer) else { return nil }
+        let wide = CVPixelBufferGetWidth(pb) > CVPixelBufferGetHeight(pb)
+        return wide == orientation.isLandscape ? orientation : nil
+    }
+
     func start() { sessionQueue.async { if !self.session.isRunning { self.session.startRunning() } } }
     func stop() { sessionQueue.async { if self.session.isRunning { self.session.stopRunning() } } }
 
     // MARK: Lens info for the coach
 
-    /// Current optics expressed in WralyCore terms (portrait orientation).
-    func cameraInfo() -> CameraInfo {
+    /// Current optics expressed in WralyCore terms, for an upright frame held the given way.
+    func cameraInfo(orientation o: FrameOrientation = .portrait) -> CameraInfo {
+        var info = portraitCameraInfo()
+        info.orientation = o
+        if o.isLandscape {
+            info.aspect = 1 / info.aspect
+            swap(&info.verticalFOV, &info.horizontalFOV)
+        }
+        return info
+    }
+
+    private func portraitCameraInfo() -> CameraInfo {
         guard let device else {
             return CameraInfo(equivalentFocalLength: 26, verticalFOV: 69, horizontalFOV: 54)
         }
@@ -133,7 +177,7 @@ final class CameraService: NSObject, @unchecked Sendable {
     // MARK: Applying the plan
 
     /// Applies focus, metering, exposure and white balance. Throttled so AE/AF aren't constantly restarted.
-    func apply(_ plan: CapturePlan) {
+    func apply(_ plan: CapturePlan, orientation o: FrameOrientation) {
         let now = CACurrentMediaTime()
         if let last = lastApplied, now - lastAppliedAt < 0.5, !Self.differsMeaningfully(last, plan) { return }
         lastApplied = plan; lastAppliedAt = now
@@ -143,11 +187,11 @@ final class CameraService: NSObject, @unchecked Sendable {
             defer { device.unlockForConfiguration() }
 
             if let p = plan.focusPoint, device.isFocusPointOfInterestSupported {
-                device.focusPointOfInterest = Self.devicePoint(p)
+                device.focusPointOfInterest = Self.devicePoint(p, o)
                 if device.isFocusModeSupported(.continuousAutoFocus) { device.focusMode = .continuousAutoFocus }
             }
             if let p = plan.meteringPoint, device.isExposurePointOfInterestSupported {
-                device.exposurePointOfInterest = Self.devicePoint(p)
+                device.exposurePointOfInterest = Self.devicePoint(p, o)
             }
             if device.isExposureModeSupported(.continuousAutoExposure) {
                 device.exposureMode = .continuousAutoExposure
@@ -189,8 +233,11 @@ final class CameraService: NSObject, @unchecked Sendable {
             || a.whiteBalance != b.whiteBalance || a.maxExposureSeconds != b.maxExposureSeconds
     }
 
-    /// Portrait, top-left-origin frame point → sensor (landscape-right) point of interest.
-    static func devicePoint(_ p: Point2) -> CGPoint { CGPoint(x: p.y, y: 1 - p.x) }
+    /// Upright, top-left-origin frame point → sensor point of interest.
+    static func devicePoint(_ p: Point2, _ o: FrameOrientation) -> CGPoint {
+        let s = o.toSensor(p)
+        return CGPoint(x: s.x, y: s.y)
+    }
 
     // MARK: Capture
 

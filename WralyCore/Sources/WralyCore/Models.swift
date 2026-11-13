@@ -3,7 +3,7 @@ import Foundation
 // MARK: - Geometry
 
 /// A point in normalised frame coordinates.
-/// Origin is the TOP-LEFT of the portrait frame, x grows right, y grows down,
+/// Origin is the TOP-LEFT of the upright frame (portrait or landscape), x grows right, y grows down,
 /// both in 0...1. (Vision uses bottom-left; the app converts before calling in.)
 public struct Point2: Equatable, Hashable, Sendable {
     public var x: Double
@@ -211,11 +211,52 @@ public struct LensReading: Equatable, Sendable {
     }
 }
 
+/// Which way up the phone (and so the picture) is held.
+public enum FrameOrientation: String, Sendable {
+    case portrait
+    /// Phone turned a quarter turn clockwise: its top points right.
+    case landscapeClockwise
+    /// Phone turned a quarter turn counter-clockwise: its top points left.
+    case landscapeCounterClockwise
+
+    public var isLandscape: Bool { self != .portrait }
+
+    /// The phone's rotation from upright, degrees clockwise.
+    public var degrees: Double {
+        switch self {
+        case .portrait: return 0
+        case .landscapeClockwise: return 90
+        case .landscapeCounterClockwise: return -90
+        }
+    }
+
+    /// Upright-frame point → the same point on the portrait-locked screen.
+    public func toScreen(_ p: Point2) -> Point2 {
+        switch self {
+        case .portrait: return p
+        case .landscapeClockwise: return Point2(p.y, 1 - p.x)
+        case .landscapeCounterClockwise: return Point2(1 - p.y, p.x)
+        }
+    }
+
+    /// Upright-frame point → sensor point of interest (landscape, top-left origin).
+    public func toSensor(_ p: Point2) -> Point2 {
+        switch self {
+        case .portrait: return Point2(p.y, 1 - p.x)
+        case .landscapeCounterClockwise: return p
+        case .landscapeClockwise: return Point2(1 - p.x, 1 - p.y)
+        }
+    }
+}
+
 public struct DeviceAttitude: Equatable, Sendable {
     /// 0 = phone perfectly upright. Positive = lens pointing UP (phone top tilted away).
     public var pitchDegrees: Double
-    /// 0 = level. Positive = phone rotated clockwise as seen by the photographer.
+    /// 0 = level for the way the phone is held (portrait or landscape).
+    /// Positive = phone rotated clockwise as seen by the photographer.
     public var rollDegrees: Double
+    /// Portrait or sideways. `rollDegrees` is measured from this.
+    public var orientation: FrameOrientation = .portrait
     /// How much the phone is moving (rotation rate magnitude, rad/s).
     public var shake: Double
     /// Compass heading of the lens direction in degrees (0 = north), if available.
@@ -233,8 +274,10 @@ public struct CameraInfo: Equatable, Sendable {
     public var verticalFOV: Double
     /// Horizontal field of view of the portrait frame, degrees.
     public var horizontalFOV: Double
-    /// Portrait frame aspect (width / height), e.g. 0.75 for 3:4.
+    /// Frame aspect (width / height): 0.75 for an upright 3:4 frame, 1.33 sideways.
     public var aspect: Double
+    /// Which way up the analysed frame is. Coordinates are always upright for the scene.
+    public var orientation: FrameOrientation = .portrait
     /// Current zoom in user-facing units: 1 = main wide camera, 0.5 = ultra-wide.
     public var zoomFactor: Double
     /// User-facing zoom factors this device reaches optically (e.g. [0.5, 1, 2, 5]).
@@ -266,6 +309,8 @@ public struct FrameSnapshot: Sendable {
     public var depthDistance: Double?
     /// Sun position relative to the scene, when location + heading are available.
     public var sun: SunPosition?
+    /// Every detected face (not just the main subject), for group framing.
+    public var faces: [Rect2] = []
 
     public init(timestamp: TimeInterval, personCount: Int, pose: BodyPose? = nil, face: FaceReading? = nil,
                 light: LightReading? = nil, background: BackgroundReading? = nil, lens: LensReading? = nil,

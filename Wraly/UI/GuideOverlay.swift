@@ -9,15 +9,24 @@ struct GuideOverlay: View {
     var body: some View {
         GeometryReader { geo in
             let size = geo.size
+            let o = coach.camera.orientation
+            // Analysis coordinates are upright for the scene. When the phone is sideways,
+            // draw them in a sideways box and turn it to match the portrait-locked screen.
+            let frame = o.isLandscape ? CGSize(width: size.height, height: size.width) : size
             ZStack {
                 if coach.showGrid { ThirdsGrid() }
-                TargetBand(shot: coach.state.shot, size: size)
-                if coach.showSkeleton { Skeleton(joints: coach.joints, size: size) }
-                if let box = coach.faceBox { FaceMarker(box: box, focus: coach.state.plan.focusPoint, size: size) }
-                LevelLine(attitude: coach.attitude, size: size)
-                if let metrics = coach.state.metrics, coach.attitude != nil {
-                    HeightRuler(metrics: metrics, shot: coach.state.shot, size: size)
+                ZStack {
+                    if coach.mode != .scenery { TargetBand(shot: coach.state.shot, size: frame) }
+                    if coach.showSkeleton { Skeleton(joints: coach.joints, size: frame) }
+                    if let box = coach.faceBox { FaceMarker(box: box, focus: coach.state.plan.focusPoint, size: frame) }
+                    if let metrics = coach.state.metrics, coach.attitude != nil, coach.mode != .scenery {
+                        HeightRuler(metrics: metrics, shot: coach.state.shot, size: frame)
+                    }
                 }
+                .frame(width: frame.width, height: frame.height)
+                .rotationEffect(.degrees(-o.degrees))
+                .position(x: size.width / 2, y: size.height / 2)
+                LevelLine(attitude: coach.attitude, size: size)
             }
         }
         .allowsHitTesting(false)
@@ -116,7 +125,8 @@ private struct LevelLine: View {
             Capsule()
                 .fill(level ? Color.green : Color.white.opacity(0.8))
                 .frame(width: size.width * 0.28, height: 2)
-                .rotationEffect(.degrees(-a.rollDegrees))
+                // Along the horizon: the roll from level plus the quarter turn when sideways.
+                .rotationEffect(.degrees(-(a.rollDegrees + a.orientation.degrees)))
                 .position(x: size.width / 2, y: size.height / 2)
                 .animation(.easeOut(duration: 0.15), value: a.rollDegrees)
         }

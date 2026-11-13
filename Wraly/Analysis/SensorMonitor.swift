@@ -43,18 +43,28 @@ final class SensorMonitor: NSObject, CLLocationManagerDelegate, @unchecked Senda
                 let g = m.gravity
                 // Back camera looks along −z. Upright phone: g ≈ (0, −1, 0).
                 // Lens pitch (positive = pointing up) and roll (positive = clockwise).
-                let pitch = atan2(g.z, -g.y) * 180 / .pi
-                let roll = atan2(g.x, -g.y) * 180 / .pi
+                let pitch = atan2(g.z, hypot(g.x, g.y)) * 180 / .pi
+                let rawRoll = atan2(g.x, -g.y) * 180 / .pi
                 let r = m.rotationRate
                 let shake = sqrt(r.x * r.x + r.y * r.y + r.z * r.z)
+                var changed: FrameOrientation?
                 self.lock.withLock {
-                    // Light smoothing so the level indicator doesn't jitter.
                     let prev = self._attitude
+                    let o = Self.orientation(rawRoll: rawRoll, flat: abs(g.z) > 0.85, current: prev?.orientation ?? .portrait)
+                    if o != prev?.orientation { changed = o }
+                    let roll = rawRoll - o.degrees
+                    // Light smoothing so the level indicator doesn't jitter (restart after a turn).
+                    let p = o == prev?.orientation ? prev : nil
                     let k = 0.25
-                    self._attitude = DeviceAttitude(
+                    var a = DeviceAttitude(
                         pitchDegrees: prev.map { $0.pitchDegrees + (pitch - $0.pitchDegrees) * k } ?? pitch,
-                        rollDegrees: prev.map { $0.rollDegrees + (roll - $0.rollDegrees) * k } ?? roll,
+                        rollDegrees: p.map { $0.rollDegrees + (roll - $0.rollDegrees) * k } ?? roll,
                         shake: prev.map { $0.shake + (shake - $0.shake) * 0.3 } ?? shake)
+                    a.orientation = o
+                    self._attitude = a
+                }
+                if let changed {
+                    DispatchQueue.main.async { self.location.headingOrientation = Self.headingOrientation(changed) }
                 }
             }
         }
@@ -66,6 +76,24 @@ final class SensorMonitor: NSObject, CLLocationManagerDelegate, @unchecked Senda
         case .notDetermined: location.requestWhenInUseAuthorization()
         case .authorizedAlways, .authorizedWhenInUse: beginLocation()
         default: break
+        }
+    }
+
+    /// Portrait or sideways, with a dead band so it doesn't flicker near 45°.
+    /// Flat (pointing at the floor/sky) or upside down keeps the last orientation.
+    static func orientation(rawRoll: Double, flat: Bool, current: FrameOrientation) -> FrameOrientation {
+        guard !flat, abs(rawRoll - current.degrees) > 55 else { return current }
+        if abs(rawRoll) < 40 { return .portrait }
+        if rawRoll > 50 && rawRoll < 130 { return .landscapeClockwise }
+        if rawRoll < -50 && rawRoll > -130 { return .landscapeCounterClockwise }
+        return current
+    }
+
+    static func headingOrientation(_ o: FrameOrientation) -> CLDeviceOrientation {
+        switch o {
+        case .portrait: return .portrait
+        case .landscapeClockwise: return .landscapeRight        // home side on the left
+        case .landscapeCounterClockwise: return .landscapeLeft  // home side on the right
         }
     }
 

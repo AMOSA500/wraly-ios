@@ -61,6 +61,8 @@ public final class GuidanceEngine {
     private let expression = ExpressionAdvisor()
     private let scenery = SceneryAdvisor()
     private let environmental = EnvironmentalFramingAdvisor()
+    private let group = GroupAdvisor()
+    private let orientation = OrientationAdvisor()
     private let planner = CapturePlanner()
 
     private var firstSeen: [String: TimeInterval] = [:]
@@ -91,6 +93,7 @@ public final class GuidanceEngine {
             issues += angle.evaluate(s, metrics: nil, target: shot)
                 .filter { $0.id != "angle.level" && $0.id != "angle.pitch" }  // scenery has its own, stricter rules
             issues += scenery.evaluate(s)
+            issues += orientation.evaluate(s, mode: mode, shot: shot)
 
         case .environmental:
             shot = .fullBody
@@ -115,6 +118,14 @@ public final class GuidanceEngine {
             issues += background.evaluate(s, metrics: metrics)
             if poseRecipe == nil {
                 issues += pose.evaluate(s, metrics: metrics, target: shot)
+            }
+        }
+
+        if mode != .scenery {
+            issues += orientation.evaluate(s, mode: mode, shot: shot)
+            if s.faces.count >= 2 {
+                issues = issues.filter { !GroupAdvisor.singleSubjectRules.contains($0.id) }
+                issues += group.evaluate(s)
             }
         }
 
