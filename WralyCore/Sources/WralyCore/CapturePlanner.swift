@@ -35,7 +35,9 @@ public struct CapturePlan: Equatable, Sendable {
 public struct CapturePlanner: Sendable {
     public init() {}
 
-    public func plan(for s: FrameSnapshot, metrics m: SubjectMetrics?, target shot: ShotType) -> CapturePlan {
+    public func plan(for s: FrameSnapshot, metrics m: SubjectMetrics?, target shot: ShotType,
+                     mode: CaptureMode = .portrait) -> CapturePlan {
+        if mode == .scenery { return sceneryPlan(for: s) }
         var p = CapturePlan.neutral
         let f = s.camera.equivalentFocalLength
 
@@ -113,7 +115,41 @@ public struct CapturePlanner: Sendable {
            !shot.idealFocalRange.contains(f) {
             p.suggestedZoom = stop
         }
+        if mode == .environmental { p.suggestedZoom = nil }   // wide lenses are welcome here
         if (s.light?.ev100 ?? 10) < 3 || s.face?.eyesOpen == nil { p.burstCount = max(p.burstCount, 3) }
+        return p
+    }
+
+    /// Views: nothing moves, so only hand shake limits the shutter; meter the whole
+    /// frame but protect the sky; focus mid-frame.
+    func sceneryPlan(for s: FrameSnapshot) -> CapturePlan {
+        var p = CapturePlan.neutral
+        let f = s.camera.equivalentFocalLength
+        var shutter = 1.0 / (2 * max(f, 13))
+        if let ev = s.light?.ev100, ev < 3 {
+            shutter = max(shutter, 1.0 / 15)
+            p.burstCount = 3
+            p.notes.append("Dim scene: up to 1/15 s, keeping the sharpest of 3")
+        }
+        p.maxExposureSeconds = shutter
+        p.maxISO = 1600
+        p.notes.append("Shutter no slower than 1/\(Int((1 / shutter).rounded())) s")
+        p.focusPoint = Point2(0.5, 0.5)
+        p.meteringPoint = Point2(0.5, 0.5)
+        var bias = 0.0
+        if let clipped = s.light?.clippedHighlights, clipped > 0.06 {
+            bias -= 0.7
+            p.notes.append("Bright sky: −0.7 EV to keep cloud detail")
+        }
+        if !Set(s.background?.sceneLabels ?? []).isDisjoint(with: ["snow", "beach"]) {
+            bias += 0.7
+            p.notes.append("Snow/sand fools the meter: +0.7 EV")
+        }
+        p.exposureBias = max(-2, min(2, bias))
+        if let sun = s.sun, sun.phase == .goldenHour {
+            p.whiteBalance = .locked(kelvin: 5500, tint: 0)
+            p.notes.append("WB locked to daylight to keep golden-hour warmth")
+        }
         return p
     }
 

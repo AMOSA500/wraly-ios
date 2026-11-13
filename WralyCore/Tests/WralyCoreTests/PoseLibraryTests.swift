@@ -105,3 +105,52 @@ final class TiltDirectionTests: XCTestCase {
         XCTAssertTrue(issues.contains { $0.message == "Level the phone — turn it slightly left" })
     }
 }
+
+final class HeadroomAndModeTests: XCTestCase {
+    private func headroomMessage(_ s: FrameSnapshot, _ shot: ShotType) -> String? {
+        GuidanceEngine(targetShot: shot).evaluate(s).issues.first { $0.id == "frame.headroom.tooMuch" }?.message
+    }
+
+    func testHeadroomFixForCloseShotIsATilt() {
+        let s = Fixture.snapshot(Fixture.person(top: 0.3, head: 0.25))
+        XCTAssertEqual(headroomMessage(s, .halfBody), "Too much space above — tilt down slightly")
+    }
+
+    func testHeadroomFixWhenLensIsHighIsLowerThePhone() {
+        // Phone tipped down from above: the lens-height line sits near the crown.
+        let s = Fixture.snapshot(Fixture.person(top: 0.3, head: 0.25), pitch: -12)
+        XCTAssertEqual(headroomMessage(s, .halfBody), "Too much space above — lower the phone")
+    }
+
+    func testSceneryNeedsNoPerson() {
+        let engine = GuidanceEngine()
+        engine.mode = .scenery
+        let empty = FrameSnapshot(timestamp: 0, personCount: 0,
+                                  attitude: DeviceAttitude(pitchDegrees: 0, rollDegrees: 0),
+                                  camera: Fixture.camera)
+        var state = CoachState.empty
+        for i in 0..<12 { state = engine.update(FrameSnapshot(timestamp: Double(i) * 0.1, personCount: 0,
+                                                             attitude: empty.attitude, camera: Fixture.camera)) }
+        XCTAssertFalse(state.all.contains { $0.id == "subject.none" })
+        XCTAssertTrue(state.readyToCapture)
+        XCTAssertNil(state.pose)
+    }
+
+    func testSceneryAsksToLevelTheHorizon() {
+        let engine = GuidanceEngine()
+        engine.mode = .scenery
+        let s = FrameSnapshot(timestamp: 0, personCount: 0,
+                              attitude: DeviceAttitude(pitchDegrees: 0, rollDegrees: 4), camera: Fixture.camera)
+        XCTAssertTrue(engine.evaluate(s).issues.contains { $0.message == "Level the horizon — turn it slightly left" })
+    }
+
+    func testEnvironmentalPutsSubjectOnAThird() throws {
+        let engine = GuidanceEngine()
+        engine.mode = .environmental
+        // Small, centred, looking at the camera.
+        let s = Fixture.snapshot(Fixture.person(top: 0.3, head: 0.06, x: 0.5))
+        let ids = engine.evaluate(s).issues.map(\.id)
+        XCTAssertTrue(ids.contains("env.thirds"))
+        XCTAssertFalse(ids.contains("frame.tooLoose"), "small is fine here")
+    }
+}

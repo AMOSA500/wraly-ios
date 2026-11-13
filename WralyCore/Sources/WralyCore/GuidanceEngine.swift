@@ -42,6 +42,8 @@ public final class GuidanceEngine {
     public var tuning = Tuning()
     /// nil = automatic: coach whatever shot the photographer is already framing.
     public var targetShot: ShotType?
+    /// Portrait, person-in-a-place, or scenery with no person.
+    public var mode: CaptureMode = .portrait
     /// The pose the photographer is directing. While set, its next unconfirmed
     /// step replaces the generic pose tips and holds auto-capture.
     public var poseRecipe: PoseRecipe? {
@@ -57,6 +59,8 @@ public final class GuidanceEngine {
     private let background = BackgroundAdvisor()
     private let pose = PoseAdvisor()
     private let expression = ExpressionAdvisor()
+    private let scenery = SceneryAdvisor()
+    private let environmental = EnvironmentalFramingAdvisor()
     private let planner = CapturePlanner()
 
     private var firstSeen: [String: TimeInterval] = [:]
@@ -78,17 +82,40 @@ public final class GuidanceEngine {
     /// Raw, unstabilised evaluation — useful for tests and debugging.
     public func evaluate(_ s: FrameSnapshot) -> (issues: [Guidance], metrics: SubjectMetrics?, shot: ShotType) {
         let metrics = SubjectMetrics(snapshot: s)
-        let shot = targetShot ?? stickyAutoShot(metrics?.currentShot)
-        var issues = expression.evaluate(s, metrics: metrics)
-        issues += lens.evaluate(s, metrics: metrics, target: shot)
-        issues += lighting.evaluate(s, metrics: metrics)
-        issues += angle.evaluate(s, metrics: metrics, target: shot)
-        if let metrics {
-            issues += framing.evaluate(s, metrics: metrics, target: shot)
-        }
-        issues += background.evaluate(s, metrics: metrics)
-        if poseRecipe == nil {
-            issues += pose.evaluate(s, metrics: metrics, target: shot)
+        var issues: [Guidance]
+        let shot: ShotType
+        switch mode {
+        case .scenery:
+            shot = targetShot ?? .fullBody
+            issues = lens.evaluate(s, metrics: nil, target: shot)          // smudge only without a subject
+            issues += angle.evaluate(s, metrics: nil, target: shot)
+                .filter { $0.id != "angle.level" && $0.id != "angle.pitch" }  // scenery has its own, stricter rules
+            issues += scenery.evaluate(s)
+
+        case .environmental:
+            shot = .fullBody
+            issues = expression.evaluate(s, metrics: metrics)
+            issues += lens.evaluate(s, metrics: metrics, target: shot)
+                .filter { $0.id != "lens.suggestStop" && $0.id != "lens.tooWide" }  // wide is welcome here
+            issues += lighting.evaluate(s, metrics: metrics)
+            issues += angle.evaluate(s, metrics: metrics, target: shot)
+            if let metrics { issues += environmental.evaluate(s, metrics: metrics) }
+            issues += background.evaluate(s, metrics: metrics).filter { $0.id != "bg.busy" }
+            if poseRecipe == nil { issues += pose.evaluate(s, metrics: metrics, target: shot) }
+
+        case .portrait:
+            shot = targetShot ?? stickyAutoShot(metrics?.currentShot)
+            issues = expression.evaluate(s, metrics: metrics)
+            issues += lens.evaluate(s, metrics: metrics, target: shot)
+            issues += lighting.evaluate(s, metrics: metrics)
+            issues += angle.evaluate(s, metrics: metrics, target: shot)
+            if let metrics {
+                issues += framing.evaluate(s, metrics: metrics, target: shot)
+            }
+            issues += background.evaluate(s, metrics: metrics)
+            if poseRecipe == nil {
+                issues += pose.evaluate(s, metrics: metrics, target: shot)
+            }
         }
 
         // De-duplicate by id, keep priority order.
@@ -100,7 +127,7 @@ public final class GuidanceEngine {
     public func update(_ s: FrameSnapshot) -> CoachState {
         let now = s.timestamp
         var (issues, metrics, shot) = evaluate(s)
-        let progress = poseMatcher.update(s, metrics: metrics)
+        let progress = mode == .scenery ? nil : poseMatcher.update(s, metrics: metrics)
         if let progress, let step = progress.nextStep, s.personCount > 0 {
             issues.append(Guidance("posegoal.\(step.id)", .pose, .fix, .subject, step.step.check.instruction(step.step.say, s),
                                    reason: "\(progress.recipe.name): \(progress.recipe.summary)"))
@@ -122,18 +149,19 @@ public final class GuidanceEngine {
 
         // Readiness / capture gate.
         let blocking = established.filter { $0.severity >= .fix }
-        if !blocking.isEmpty || s.personCount == 0 { lastBlockingAt = now }
-        let eyesOK = s.face?.eyesOpen ?? false
-        let ready = blocking.isEmpty && s.personCount > 0 && eyesOK && now - lastBlockingAt >= tuning.captureHold
+        let subjectOK = !mode.needsPerson || s.personCount > 0
+        if !blocking.isEmpty || !subjectOK { lastBlockingAt = now }
+        let eyesOK = mode == .scenery || (s.face?.eyesOpen ?? false)
+        let ready = blocking.isEmpty && subjectOK && eyesOK && now - lastBlockingAt >= tuning.captureHold
         let penalty = established.reduce(0.0) { acc, g in
             acc + (g.severity == .critical ? 0.6 : g.severity == .fix ? 0.18 : 0.03)
         }
-        let readiness = s.personCount == 0 ? 0 : max(0, min(1, 1 - penalty))
+        let readiness = !subjectOK ? 0 : max(0, min(1, 1 - penalty))
 
         // Choose the single instruction to show.
         let primary = choosePrimary(established, now: now)
 
-        let plan = planner.plan(for: s, metrics: metrics, target: shot)
+        let plan = planner.plan(for: s, metrics: metrics, target: shot, mode: mode)
         return CoachState(primary: primary, all: established, readiness: readiness,
                           readyToCapture: ready, metrics: metrics, plan: plan, shot: shot, pose: progress)
     }

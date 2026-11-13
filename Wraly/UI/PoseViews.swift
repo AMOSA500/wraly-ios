@@ -7,7 +7,9 @@ struct PoseCard: View {
     @Binding var showPicker: Bool
 
     var body: some View {
-        if let recipe = coach.poseRecipe {
+        if coach.mode == .scenery {
+            EmptyView()
+        } else if let recipe = coach.poseRecipe {
             let progress = coach.state.pose?.recipe == recipe ? coach.state.pose : nil
             let matched = progress?.matched ?? false
             VStack(alignment: .leading, spacing: 6) {

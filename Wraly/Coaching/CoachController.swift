@@ -28,6 +28,15 @@ final class CoachController {
         didSet { let t = targetShot; analysisQueue { $0.engine.targetShot = t; $0.engine.reset() } }
     }
     var autoCapture = true
+    /// Portrait, person in a place, or scenery.
+    var mode: CaptureMode = .portrait {
+        didSet {
+            guard mode != oldValue else { return }
+            let m = mode
+            analysisQueue { $0.engine.mode = m; $0.engine.reset() }
+            voice.clear()
+        }
+    }
     /// Recommend poses and confirm the subject is in them before shooting.
     var poseGuide = true {
         didSet { poseRecipe = poseGuide ? PoseLibrary.recommended(for: state.shot).first : nil }
@@ -134,7 +143,7 @@ final class CoachController {
         voice.announce(coach.primary)
 
         // Keep the pose suited to the shot being framed.
-        if poseGuide, let r = poseRecipe, !r.shots.contains(coach.shot) {
+        if poseGuide, mode != .scenery, let r = poseRecipe, !r.shots.contains(coach.shot) {
             poseRecipe = PoseLibrary.recommended(for: coach.shot).first
         }
         let matched = coach.pose?.matched ?? false
@@ -179,7 +188,7 @@ final class CoachController {
                 case .success(let photo):
                     self.lastPhoto = photo
                     self.voice.say("Got it")
-                    if self.poseGuide, self.autoNextPose { self.advancePoseAfterShot() }
+                    if self.poseGuide, self.autoNextPose, self.mode != .scenery { self.advancePoseAfterShot() }
                 case .failure(let error):
                     self.errorMessage = "Couldn't save photo: \(error.localizedDescription)"
                 }

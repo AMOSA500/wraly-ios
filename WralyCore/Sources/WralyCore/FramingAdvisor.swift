@@ -76,11 +76,9 @@ public struct FramingAdvisor: Sendable {
 
         // 3. Headroom — the most common phone-photo mistake is too much sky over the head.
         let headroom = L[.crown]
-        if headroom > t.headroom.upperBound + 0.03 {
-            out.append(Guidance("frame.headroom.tooMuch", .framing, .fix, .photographer,
-                                shot == .fullBody ? "Too much space above — step closer" : "Too much space above the head",
-                                reason: "Empty space above the head makes the subject look like they're sinking. Keep \(Self.percent(t.headroom)) of the frame above the crown.",
-                                cue: shot == .fullBody ? .moveCloser : .tiltDown))
+        if headroom > t.headroom.upperBound + 0.03,
+           let fix = Self.headroomFix(s, m, shot: shot, target: t, cutHeads: cutHeads) {
+            out.append(fix)
         } else if headroom < t.headroom.lowerBound - 0.02 {
             out.append(Guidance("frame.headroom.cropped", .framing, shot == .headshot ? .tip : .fix, .photographer,
                                 "Head is cut off — tilt up slightly",
@@ -140,6 +138,40 @@ public struct FramingAdvisor: Sendable {
     }
 
     // MARK: helpers
+
+    /// Picks the one fix for too much space above the head that won't cause a new problem.
+    static func headroomFix(_ s: FrameSnapshot, _ m: SubjectMetrics, shot: ShotType,
+                            target t: Target, cutHeads: Double) -> Guidance? {
+        let base = "Empty space above the head makes the subject look like they're sinking. Keep \(percent(t.headroom)) of the frame above the crown."
+        func g(_ msg: String, _ why: String, _ cue: Cue) -> Guidance {
+            Guidance("frame.headroom.tooMuch", .framing, .fix, .photographer, msg, reason: base + " " + why, cue: cue)
+        }
+        // 1. Subject small in the frame: "Move closer or zoom in" already covers it.
+        if cutHeads > t.cutHeads.upperBound + 0.3 { return nil }
+
+        // 2. Lens above the ideal height: lower it, phone upright, and the head rises in
+        //    the frame without distorting the body. (Full body: only if there's floor to spare.)
+        let ideal = CameraAngleAdvisor.idealHeight(for: shot)
+        let floorToSpare = shot != .fullBody || 1 - m.ladder[.soles] > 0.08
+        if let heads = m.cameraHeightHeads, heads < ideal.range.lowerBound + 0.1, floorToSpare {
+            return g("Too much space above — lower the phone",
+                     "Your lens is higher than \(ideal.label). Crouch or bend your knees and keep the phone upright — don't point it down.",
+                     .lowerPhone)
+        }
+
+        // 3. Close shots: a small downward tilt is harmless.
+        let closeShot = shot == .headshot || shot == .headAndShoulders || shot == .halfBody
+        if closeShot, (s.attitude?.pitchDegrees ?? 0) > -10 {
+            return g("Too much space above — tilt down slightly",
+                     "For close framing a small tilt is fine — put their eyes on the top grid line.",
+                     .tiltDown)
+        }
+
+        // 4. Longer shots: tilting down shortens the legs, so fill the frame instead.
+        return g("Too much space above — step closer",
+                 "Tilting down would shorten the legs and enlarge the head. Step closer or zoom so they fill the frame.",
+                 .moveCloser)
+    }
 
     /// Joint whose y is within ±3% (frame) of the bottom edge.
     static func jointNearBottomEdge(_ L: BodyLadder) -> BodyLadder.Level? {

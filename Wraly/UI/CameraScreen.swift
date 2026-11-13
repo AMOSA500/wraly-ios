@@ -58,12 +58,21 @@ private struct TopBar: View {
     @Binding var showSettings: Bool
 
     var body: some View {
-        HStack(spacing: 8) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    chip("Auto", selected: coach.targetShot == nil) { coach.targetShot = nil }
-                    ForEach(ShotType.allCases) { shot in
-                        chip(shot.title, selected: coach.targetShot == shot) { coach.targetShot = shot }
+        @Bindable var coach = coach
+        HStack(alignment: .top, spacing: 8) {
+            VStack(spacing: 6) {
+                Picker("Mode", selection: $coach.mode) {
+                    ForEach(CaptureMode.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                if coach.mode == .portrait {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            chip("Auto", selected: coach.targetShot == nil) { coach.targetShot = nil }
+                            ForEach(ShotType.allCases) { shot in
+                                chip(shot.title, selected: coach.targetShot == shot) { coach.targetShot = shot }
+                            }
+                        }
                     }
                 }
             }
