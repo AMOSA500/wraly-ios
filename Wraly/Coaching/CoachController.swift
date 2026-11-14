@@ -14,6 +14,8 @@ final class CoachController {
     var state: CoachState = .empty
     var joints: [WralyCore.Joint: Point2] = [:]
     var faceBox: Rect2?
+    /// Detected horizon, for the Landscape overlay.
+    var scene: SceneLayout?
     var attitude: DeviceAttitude?
     var camera = CameraInfo(equivalentFocalLength: 26, verticalFOV: 69, horizontalFOV: 54)
     var exposureReadout = ""
@@ -141,6 +143,7 @@ final class CoachController {
         state = coach
         joints = out.joints
         faceBox = out.faceBox
+        scene = out.snapshot.scene
         attitude = out.snapshot.attitude
         camera = info
         exposureReadout = readout

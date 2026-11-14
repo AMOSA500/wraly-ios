@@ -311,6 +311,8 @@ public struct FrameSnapshot: Sendable {
     public var sun: SunPosition?
     /// Every detected face (not just the main subject), for group framing.
     public var faces: [Rect2] = []
+    /// Horizon and sky/land layout, for landscapes.
+    public var scene: SceneLayout?
 
     public init(timestamp: TimeInterval, personCount: Int, pose: BodyPose? = nil, face: FaceReading? = nil,
                 light: LightReading? = nil, background: BackgroundReading? = nil, lens: LensReading? = nil,

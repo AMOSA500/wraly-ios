@@ -7,9 +7,11 @@ public struct ExpressionAdvisor: Sendable {
     public func evaluate(_ s: FrameSnapshot, metrics m: SubjectMetrics?) -> [Guidance] {
         var out: [Guidance] = []
         if s.personCount == 0 {
+            let view = s.background?.sceneLabels.contains { LandscapeAdvisor.viewLabels.contains($0) } ?? false
             out.append(Guidance("subject.none", .subject, .critical, .photographer,
-                                "Point the camera at your subject",
-                                reason: "Wraly coaches once it can see a person.", cue: nil))
+                                view ? "No one in frame — switch to Landscape for views" : "Point the camera at your subject",
+                                reason: view ? "Portrait mode coaches people. Landscape mode coaches the horizon, foreground and light, and needs no one in the picture."
+                                             : "Wraly coaches once it can see a person.", cue: nil))
             return out
         }
         if s.personCount > 1 {

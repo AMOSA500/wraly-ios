@@ -6,7 +6,7 @@ public enum CaptureMode: String, CaseIterable, Identifiable, Sendable {
     case portrait
     /// A person small in a place — the setting matters as much as they do.
     case environmental
-    /// Landscapes, cityscapes, rooms, views. No person needed.
+    /// Landscape photography: views, cityscapes, rooms. No person needed.
     case scenery
 
     public var id: String { rawValue }
@@ -15,7 +15,7 @@ public enum CaptureMode: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .portrait: return "Portrait"
         case .environmental: return "Person + Place"
-        case .scenery: return "Scenery"
+        case .scenery: return "Landscape"
         }
     }
 
@@ -64,7 +64,7 @@ public struct SceneryAdvisor: Sendable {
 
         if s.personCount > 0 {
             out.append(Guidance("scene.person", .subject, .tip, .photographer,
-                                "Someone's in the shot — wait, or try Person + Place",
+                                "Someone's in the view — wait, or try Person + Place",
                                 reason: "For a clean view, wait for people to move out of frame. If they belong in the picture, switch to Person + Place.",
                                 cue: .wait))
         }

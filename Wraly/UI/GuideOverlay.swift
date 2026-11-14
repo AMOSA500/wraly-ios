@@ -17,6 +17,7 @@ struct GuideOverlay: View {
                 if coach.showGrid { ThirdsGrid() }
                 ZStack {
                     if coach.mode != .scenery { TargetBand(shot: coach.state.shot, size: frame) }
+                    if coach.mode == .scenery, let L = coach.scene, L.confidence >= 0.5 { HorizonLine(layout: L, size: frame) }
                     if coach.showSkeleton { Skeleton(joints: coach.joints, size: frame) }
                     if let box = coach.faceBox { FaceMarker(box: box, focus: coach.state.plan.focusPoint, size: frame) }
                     if let metrics = coach.state.metrics, coach.attitude != nil, coach.mode != .scenery {
@@ -111,6 +112,27 @@ private struct FaceMarker: View {
                     .position(x: f.x * size.width, y: f.y * size.height)
             }
         }
+    }
+}
+
+/// The horizon Wraly found in the picture: dashed, green when it's level and on a third line.
+private struct HorizonLine: View {
+    let layout: SceneLayout
+    let size: CGSize
+
+    var body: some View {
+        let tilt = layout.horizonTiltDegrees ?? 0
+        let good = abs(tilt) <= 1.2 && abs(layout.horizonY - 0.5) >= 0.07
+        Canvas { ctx, sz in
+            let cy = layout.horizonY * sz.height
+            let k = tan(tilt * .pi / 180)
+            var p = Path()
+            p.move(to: CGPoint(x: 0, y: cy - sz.width / 2 * k))
+            p.addLine(to: CGPoint(x: sz.width, y: cy + sz.width / 2 * k))
+            ctx.stroke(p, with: .color(good ? .green.opacity(0.8) : .orange.opacity(0.8)),
+                       style: StrokeStyle(lineWidth: 1.5, dash: [6, 5]))
+        }
+        .frame(width: size.width, height: size.height)
     }
 }
 

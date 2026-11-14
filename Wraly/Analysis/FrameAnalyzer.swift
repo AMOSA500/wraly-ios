@@ -147,6 +147,9 @@ final class FrameAnalyzer {
             attitude: attitude, camera: camera, depthDistance: nil, sun: sun)
         var snap = snapshot
         snap.faces = faces.map { Self.rect($0.boundingBox) }
+        if let grid {
+            snap.scene = SceneLayout.analyze(luma: grid.values, width: grid.width, height: grid.height, aspect: camera.aspect)
+        }
         return Output(snapshot: snap, joints: joints, faceBox: faceBox)
     }
 

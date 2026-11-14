@@ -60,6 +60,7 @@ public final class GuidanceEngine {
     private let pose = PoseAdvisor()
     private let expression = ExpressionAdvisor()
     private let scenery = SceneryAdvisor()
+    private let landscape = LandscapeAdvisor()
     private let environmental = EnvironmentalFramingAdvisor()
     private let group = GroupAdvisor()
     private let orientation = OrientationAdvisor()
@@ -93,6 +94,7 @@ public final class GuidanceEngine {
             issues += angle.evaluate(s, metrics: nil, target: shot)
                 .filter { $0.id != "angle.level" && $0.id != "angle.pitch" }  // scenery has its own, stricter rules
             issues += scenery.evaluate(s)
+            issues += landscape.evaluate(s)
             issues += orientation.evaluate(s, mode: mode, shot: shot)
 
         case .environmental:
