@@ -25,7 +25,7 @@ final class OrientationTests: XCTestCase {
 
     func testSceneryAsksForLandscapeOnlyWhenUpright() {
         let engine = GuidanceEngine()
-        engine.mode = .scenery
+        engine.mode = .landscape
         let upright = FrameSnapshot(timestamp: 0, personCount: 0, camera: Fixture.camera)
         XCTAssertTrue(engine.evaluate(upright).issues.contains { $0.id == "scene.sideways" })
         let sideways = FrameSnapshot(timestamp: 0, personCount: 0, camera: landscapeCamera)

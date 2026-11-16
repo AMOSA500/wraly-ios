@@ -16,11 +16,19 @@ struct GuideOverlay: View {
             ZStack {
                 if coach.showGrid { ThirdsGrid() }
                 ZStack {
-                    if coach.mode != .scenery { TargetBand(shot: coach.state.shot, size: frame) }
-                    if coach.mode == .scenery, let L = coach.scene, L.confidence >= 0.5 { HorizonLine(layout: L, size: frame) }
+                    if coach.state.mode.needsPerson { TargetBand(shot: coach.state.shot, size: frame) }
+                    if coach.state.mode == .landscape, let L = coach.scene, L.confidence >= 0.5 { HorizonLine(layout: L, size: frame) }
                     if coach.showSkeleton { Skeleton(joints: coach.joints, size: frame) }
-                    if let box = coach.faceBox { FaceMarker(box: box, focus: coach.state.plan.focusPoint, size: frame) }
-                    if let metrics = coach.state.metrics, coach.attitude != nil, coach.mode != .scenery {
+                    if let box = coach.faceBox {
+                        FaceMarker(box: box, focus: coach.state.plan.focusPoint, size: frame)
+                    } else if !coach.state.mode.needsPerson, let f = coach.state.plan.focusPoint {
+                        // Where Wraly is focusing on a thing or a view.
+                        Image(systemName: "plus.viewfinder")
+                            .font(.system(size: 22, weight: .light)).foregroundStyle(.yellow)
+                            .position(x: f.x * frame.width, y: f.y * frame.height)
+                            .animation(.easeOut(duration: 0.2), value: f)
+                    }
+                    if let metrics = coach.state.metrics, coach.attitude != nil, coach.state.mode.needsPerson {
                         HeightRuler(metrics: metrics, shot: coach.state.shot, size: frame)
                     }
                 }

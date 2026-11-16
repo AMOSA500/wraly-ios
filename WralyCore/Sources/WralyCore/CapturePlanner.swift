@@ -36,8 +36,9 @@ public struct CapturePlanner: Sendable {
     public init() {}
 
     public func plan(for s: FrameSnapshot, metrics m: SubjectMetrics?, target shot: ShotType,
-                     mode: CaptureMode = .portrait) -> CapturePlan {
-        if mode == .scenery { return sceneryPlan(for: s) }
+                     mode: CaptureMode = .portrait, kind: SubjectKind? = nil) -> CapturePlan {
+        if mode.isView { return sceneryPlan(for: s, night: kind == .night) }
+        if mode == .object { return objectPlan(for: s, kind: kind ?? .product) }
         var p = CapturePlan.neutral
         let f = s.camera.equivalentFocalLength
 
@@ -122,17 +123,21 @@ public struct CapturePlanner: Sendable {
 
     /// Views: nothing moves, so only hand shake limits the shutter; meter the whole
     /// frame but protect the sky; focus mid-frame.
-    func sceneryPlan(for s: FrameSnapshot) -> CapturePlan {
+    func sceneryPlan(for s: FrameSnapshot, night: Bool = false) -> CapturePlan {
         var p = CapturePlan.neutral
         let f = s.camera.equivalentFocalLength
         var shutter = 1.0 / (2 * max(f, 13))
         p.burstCount = 3   // handheld: shoot three, keep the sharpest
-        if let ev = s.light?.ev100, ev < 3 {
+        if night {
+            shutter = max(shutter, 1.0 / 8)
+            p.maxISO = 3200
+            p.notes.append("Night: up to 1/8 s, three frames, sharpest kept")
+        } else if let ev = s.light?.ev100, ev < 3 {
             shutter = max(shutter, 1.0 / 15)
             p.notes.append("Dim scene: up to 1/15 s")
         }
         p.maxExposureSeconds = shutter
-        p.maxISO = 1600
+        if !night { p.maxISO = 1600 }
         p.notes.append("Shutter no slower than 1/\(Int((1 / shutter).rounded())) s")
         p.focusPoint = Point2(0.5, 0.5)
         p.meteringPoint = Point2(0.5, 0.5)
@@ -145,11 +150,72 @@ public struct CapturePlanner: Sendable {
             bias += 0.7
             p.notes.append("Snow/sand fools the meter: +0.7 EV")
         }
+        if night {
+            bias -= 0.3
+            p.notes.append("−0.3 EV so night still looks like night")
+        }
         p.exposureBias = max(-2, min(2, bias))
         if let sun = s.sun, sun.phase == .goldenHour {
             p.whiteBalance = .locked(kelvin: 5500, tint: 0)
             p.notes.append("WB locked to daylight to keep golden-hour warmth")
         }
+        return p
+    }
+
+    /// Things: focus and meter on the object itself, shutter for how much it moves,
+    /// exposure for what fools the meter, never flash.
+    func objectPlan(for s: FrameSnapshot, kind: SubjectKind) -> CapturePlan {
+        var p = CapturePlan.neutral
+        let f = s.camera.equivalentFocalLength
+        let dim = (s.light?.ev100 ?? 10) < 5
+        let handheld = 1.0 / (2 * max(f, 13))
+        var bias = 0.0
+
+        // Where to focus: an animal's head, else the most eye-catching object, else the centre.
+        var target = s.salientObject?.center ?? Point2(0.5, 0.5)
+        if kind == .pet, let a = s.animals.max(by: { $0.width * $0.height < $1.width * $1.height }) {
+            target = Point2(a.midX, a.minY + a.height * 0.3)
+        }
+        if kind == .document { target = Point2(0.5, 0.5) }
+        p.focusPoint = target; p.meteringPoint = target
+
+        switch kind {
+        case .pet:
+            p.maxExposureSeconds = dim ? 1.0 / 125 : 1.0 / 250
+            p.maxISO = 3200; p.burstCount = 5
+            p.notes.append("Pet: fast shutter, 5-frame burst, focus on the head")
+        case .motion:
+            p.maxExposureSeconds = dim ? 1.0 / 250 : 1.0 / 500
+            p.maxISO = 3200; p.burstCount = 5
+            p.notes.append("Action: 1/\(Int(1 / p.maxExposureSeconds)) s to freeze movement, 5-frame burst")
+        case .food:
+            p.maxExposureSeconds = max(handheld, dim ? 1.0 / 30 : 1.0 / 60)
+            p.burstCount = 3; bias += 0.3
+            p.notes.append("Food: +0.3 EV for a bright, fresh look; no flash")
+        case .flower:
+            p.maxExposureSeconds = max(handheld, 1.0 / 125)   // petals sway
+            p.burstCount = 3
+            if s.camera.opticalZoomStops.contains(where: { abs($0 - 2) < 0.2 }), abs(s.camera.zoomFactor - 1) < 0.05 {
+                p.suggestedZoom = 2
+                p.notes.append("2× for a softer background")
+            }
+            p.notes.append("Flower: focus on the centre of the bloom")
+        case .document:
+            p.maxExposureSeconds = max(handheld, 1.0 / 60)
+            p.burstCount = 2; bias += 0.7
+            p.notes.append("Document: +0.7 EV so the paper reads white")
+        default:
+            p.maxExposureSeconds = max(handheld, dim ? 1.0 / 30 : 1.0 / 60)
+            p.burstCount = 3
+            p.notes.append("Focus and exposure on the object")
+        }
+        if let clipped = s.light?.clippedHighlights, clipped > 0.1, kind != .document {
+            bias -= 0.5
+            p.notes.append("Bright highlights: −0.5 EV")
+        }
+        p.exposureBias = max(-2, min(2, bias))
+        p.flash = .off
+        p.notes.append("Shutter no slower than 1/\(Int((1 / p.maxExposureSeconds).rounded())) s")
         return p
     }
 

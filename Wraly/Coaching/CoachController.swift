@@ -31,7 +31,7 @@ final class CoachController {
     }
     var autoCapture = true
     /// Portrait, person in a place, or scenery.
-    var mode: CaptureMode = .portrait {
+    var mode: CaptureMode = .auto {
         didSet {
             guard mode != oldValue else { return }
             let m = mode
@@ -40,13 +40,14 @@ final class CoachController {
         }
     }
     /// Recommend poses and confirm the subject is in them before shooting.
-    var poseGuide = true {
+    /// Off by default so nothing extra stands between you and the photo.
+    var poseGuide = false {
         didSet { poseRecipe = poseGuide ? PoseLibrary.recommended(for: state.shot).first : nil }
     }
     /// Move to the next recommended pose after each photo.
     var autoNextPose = true
     /// The pose being directed right now.
-    var poseRecipe: PoseRecipe? = PoseLibrary.recipe(id: "classic") {
+    var poseRecipe: PoseRecipe? {
         didSet {
             guard poseRecipe != oldValue else { return }
             let r = poseRecipe
@@ -71,6 +72,10 @@ final class CoachController {
         }
     }
     func previewVoice(_ id: String?) { voice.preview(voice: id, rate: voiceRate) }
+    /// Switch to the lens Wraly recommends without asking.
+    var autoLens = true
+    /// Straighten slightly tilted photos after the shot.
+    var autoStraighten = true
     var showSkeleton = true
     var showGrid = true
 
@@ -83,6 +88,9 @@ final class CoachController {
     @ObservationIgnored private var wasReady = false
     @ObservationIgnored private var started = false
     @ObservationIgnored private var poseWasMatched = false
+    @ObservationIgnored private var lastManualZoomAt = Date.distantPast
+    @ObservationIgnored private var lastAutoZoomAt = Date.distantPast
+    @ObservationIgnored private var zoomSuggestion: (zoom: Double, since: Date)?
 
     func start() async {
         guard !started else { return }
@@ -148,9 +156,10 @@ final class CoachController {
         camera = info
         exposureReadout = readout
         voice.announce(coach.primary)
+        autoSwitchLens(coach.plan.suggestedZoom)
 
         // Keep the pose suited to the shot being framed.
-        if poseGuide, mode != .scenery, let r = poseRecipe, !r.shots.contains(coach.shot) {
+        if poseGuide, coach.mode.needsPerson, let r = poseRecipe, !r.shots.contains(coach.shot) {
             poseRecipe = PoseLibrary.recommended(for: coach.shot).first
         }
         let matched = coach.pose?.matched ?? false
@@ -187,7 +196,10 @@ final class CoachController {
         isCapturing = true
         lastCaptureAt = Date()
         let plan = state.plan
-        cameraService.capture(plan: plan, count: plan.burstCount) { [weak self] result in
+        // Small accidental tilts are fixed in the photo; bigger ones are probably on purpose.
+        let roll = attitude?.rollDegrees ?? 0
+        let straighten = autoStraighten && abs(roll) >= 0.4 && abs(roll) <= 8 ? roll : nil
+        cameraService.capture(plan: plan, count: plan.burstCount, straighten: straighten) { [weak self] result in
             Task { @MainActor in
                 guard let self else { return }
                 self.isCapturing = false
@@ -195,7 +207,7 @@ final class CoachController {
                 case .success(let photo):
                     self.lastPhoto = photo
                     self.voice.say("Got it")
-                    if self.poseGuide, self.autoNextPose, self.mode != .scenery { self.advancePoseAfterShot() }
+                    if self.poseGuide, self.autoNextPose, self.state.mode.needsPerson { self.advancePoseAfterShot() }
                 case .failure(let error):
                     self.errorMessage = "Couldn't save photo: \(error.localizedDescription)"
                 }
@@ -218,7 +230,24 @@ final class CoachController {
         }
     }
 
-    func setZoom(_ z: Double) { cameraService.setZoom(userFacing: z) }
+    /// A zoom the photographer chose — Wraly won't override it for a while.
+    func setZoom(_ z: Double) {
+        lastManualZoomAt = Date()
+        cameraService.setZoom(userFacing: z)
+    }
+
+    /// Switch to the recommended lens once the advice has been steady for a moment.
+    private func autoSwitchLens(_ suggested: Double?) {
+        guard autoLens, let z = suggested, abs(z - camera.zoomFactor) > 0.05 else { zoomSuggestion = nil; return }
+        let now = Date()
+        if zoomSuggestion?.zoom != z { zoomSuggestion = (z, now); return }
+        guard let since = zoomSuggestion?.since, now.timeIntervalSince(since) > 1.2,
+              now.timeIntervalSince(lastManualZoomAt) > 10, now.timeIntervalSince(lastAutoZoomAt) > 6 else { return }
+        lastAutoZoomAt = now
+        zoomSuggestion = nil
+        cameraService.setZoom(userFacing: z)
+        voice.say(z < 1 ? "Going wide" : "Switching to \(z == z.rounded() ? String(Int(z)) : String(z)) times")
+    }
 
     func lensWiped() {
         analysisQueue { $0.analyzer.resetLensEstimate() }

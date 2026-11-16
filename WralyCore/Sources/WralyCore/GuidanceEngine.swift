@@ -15,6 +15,10 @@ public struct CoachState: Equatable, Sendable {
     public var shot: ShotType
     /// Progress through the chosen pose, when the pose guide is on.
     public var pose: PoseProgress? = nil
+    /// The mode actually coaching this frame (Auto resolves to one of the others).
+    public var mode: CaptureMode = .portrait
+    /// What Wraly thinks it's looking at.
+    public var subject: SubjectKind = .person
 
     public static let empty = CoachState(primary: nil, all: [], readiness: 0, readyToCapture: false,
                                          metrics: nil, plan: .neutral, shot: .halfBody)
@@ -32,7 +36,7 @@ public final class GuidanceEngine {
         /// A fixed issue must stay fixed this long before it's cleared.
         public var release: TimeInterval = 0.4
         /// Nothing blocking for this long → ready to capture.
-        public var captureHold: TimeInterval = 0.7
+        public var captureHold: TimeInterval = 0.5
         /// A tip shown once is suppressed for this long.
         public var tipCooldown: TimeInterval = 25
         public var tipDisplay: TimeInterval = 3.5
@@ -42,7 +46,7 @@ public final class GuidanceEngine {
     public var tuning = Tuning()
     /// nil = automatic: coach whatever shot the photographer is already framing.
     public var targetShot: ShotType?
-    /// Portrait, person-in-a-place, or scenery with no person.
+    /// What's being shot; `.auto` lets Wraly decide from what it sees.
     public var mode: CaptureMode = .portrait
     /// The pose the photographer is directing. While set, its next unconfirmed
     /// step replaces the generic pose tips and holds auto-capture.
@@ -61,6 +65,10 @@ public final class GuidanceEngine {
     private let expression = ExpressionAdvisor()
     private let scenery = SceneryAdvisor()
     private let landscape = LandscapeAdvisor()
+    private let object = ObjectAdvisor()
+    private var kind: SubjectKind = .person
+    private var pendingKind: SubjectKind?
+    private var pendingKindFrames = 0
     private let environmental = EnvironmentalFramingAdvisor()
     private let group = GroupAdvisor()
     private let orientation = OrientationAdvisor()
@@ -82,19 +90,46 @@ public final class GuidanceEngine {
         lastBlockingAt = -.infinity
     }
 
+    /// Only problems that ruin the photo hold the shutter. Everything else is advice:
+    /// it's shown and spoken, but Wraly takes the picture anyway.
+    public static let mustFix: Set<String> = [
+        "expr.eyesClosed", "angle.shake", "group.cutSide", "group.cutBoth", "group.headCut",
+        "frame.headroom.cropped", "env.headCut",
+    ]
+
+    public static func blocksCapture(_ g: Guidance) -> Bool {
+        g.severity == .critical || mustFix.contains(g.id) || g.id.hasPrefix("posegoal.")
+    }
+
     /// Raw, unstabilised evaluation — useful for tests and debugging.
-    public func evaluate(_ s: FrameSnapshot) -> (issues: [Guidance], metrics: SubjectMetrics?, shot: ShotType) {
+    public func evaluate(_ s: FrameSnapshot) -> (issues: [Guidance], metrics: SubjectMetrics?, shot: ShotType,
+                                                  mode: CaptureMode, subject: SubjectKind) {
         let metrics = SubjectMetrics(snapshot: s)
+        let subject = stickyKind(SubjectClassifier.classify(s))
+        var mode = self.mode
+        if mode == .auto {
+            mode = subject.mode
+            // A small person in a big view: show the place too.
+            if mode == .portrait, subject == .person, let m = metrics, m.ladder.figureHeight < 0.35,
+               s.background?.sceneLabels.contains(where: { LandscapeAdvisor.viewLabels.contains($0) }) ?? false {
+                mode = .environmental
+            }
+        }
         var issues: [Guidance]
         let shot: ShotType
         switch mode {
-        case .scenery:
+        case .landscape, .scenery, .object, .auto:
             shot = targetShot ?? .fullBody
             issues = lens.evaluate(s, metrics: nil, target: shot)          // smudge only without a subject
             issues += angle.evaluate(s, metrics: nil, target: shot)
-                .filter { $0.id != "angle.level" && $0.id != "angle.pitch" }  // scenery has its own, stricter rules
-            issues += scenery.evaluate(s)
-            issues += landscape.evaluate(s)
+                .filter { $0.id != "angle.level" && $0.id != "angle.pitch" }  // views have their own, stricter rules
+            if mode == .object {
+                issues += object.evaluate(s, kind: subject)
+            } else {
+                issues += scenery.evaluate(s, strictVerticals: mode == .scenery)
+                    .filter { self.mode != .auto || $0.id != "scene.person" }  // Auto already switched for people
+                if mode == .landscape { issues += landscape.evaluate(s) }
+            }
             issues += orientation.evaluate(s, mode: mode, shot: shot)
 
         case .environmental:
@@ -123,7 +158,7 @@ public final class GuidanceEngine {
             }
         }
 
-        if mode != .scenery {
+        if mode.needsPerson {
             issues += orientation.evaluate(s, mode: mode, shot: shot)
             if s.faces.count >= 2 {
                 issues = issues.filter { !GroupAdvisor.singleSubjectRules.contains($0.id) }
@@ -134,13 +169,13 @@ public final class GuidanceEngine {
         // De-duplicate by id, keep priority order.
         var seen = Set<String>()
         issues = issues.filter { seen.insert($0.id).inserted }.sorted(by: Guidance.priority)
-        return (issues, metrics, shot)
+        return (issues, metrics, shot, mode, subject)
     }
 
     public func update(_ s: FrameSnapshot) -> CoachState {
         let now = s.timestamp
-        var (issues, metrics, shot) = evaluate(s)
-        let progress = mode == .scenery ? nil : poseMatcher.update(s, metrics: metrics)
+        var (issues, metrics, shot, mode, subject) = evaluate(s)
+        let progress = mode.needsPerson ? poseMatcher.update(s, metrics: metrics) : nil
         if let progress, let step = progress.nextStep, s.personCount > 0 {
             issues.append(Guidance("posegoal.\(step.id)", .pose, .fix, .subject, step.step.check.instruction(step.step.say, s),
                                    reason: "\(progress.recipe.name): \(progress.recipe.summary)"))
@@ -161,22 +196,24 @@ public final class GuidanceEngine {
         }
 
         // Readiness / capture gate.
-        let blocking = established.filter { $0.severity >= .fix }
+        let blocking = established.filter(Self.blocksCapture)
         let subjectOK = !mode.needsPerson || s.personCount > 0
         if !blocking.isEmpty || !subjectOK { lastBlockingAt = now }
-        let eyesOK = mode == .scenery || (s.face?.eyesOpen ?? false)
+        // Eyes only matter when a face is visible (someone looking away is a choice).
+        let eyesOK = !mode.needsPerson || s.face?.eyesOpen != false
         let ready = blocking.isEmpty && subjectOK && eyesOK && now - lastBlockingAt >= tuning.captureHold
         let penalty = established.reduce(0.0) { acc, g in
-            acc + (g.severity == .critical ? 0.6 : g.severity == .fix ? 0.18 : 0.03)
+            acc + (g.severity == .critical ? 0.6 : Self.blocksCapture(g) ? 0.3 : 0.02)
         }
         let readiness = !subjectOK ? 0 : max(0, min(1, 1 - penalty))
 
         // Choose the single instruction to show.
         let primary = choosePrimary(established, now: now)
 
-        let plan = planner.plan(for: s, metrics: metrics, target: shot, mode: mode)
+        let plan = planner.plan(for: s, metrics: metrics, target: shot, mode: mode, kind: subject)
         return CoachState(primary: primary, all: established, readiness: readiness,
-                          readyToCapture: ready, metrics: metrics, plan: plan, shot: shot, pose: progress)
+                          readyToCapture: ready, metrics: metrics, plan: plan, shot: shot, pose: progress,
+                          mode: mode, subject: subject)
     }
 
     private func choosePrimary(_ issues: [Guidance], now: TimeInterval) -> Guidance? {
@@ -208,6 +245,15 @@ public final class GuidanceEngine {
         }
         current = nil
         return nil
+    }
+
+    /// Don't flip what Wraly thinks it's looking at on every frame (people switch at once).
+    private func stickyKind(_ detected: SubjectKind) -> SubjectKind {
+        guard detected != kind else { pendingKindFrames = 0; return kind }
+        if detected == pendingKind { pendingKindFrames += 1 } else { pendingKind = detected; pendingKindFrames = 1 }
+        let needed = detected == .person || detected == .group ? 2 : 4
+        if pendingKindFrames >= needed { kind = detected; pendingKindFrames = 0 }
+        return kind
     }
 
     /// In automatic mode, don't flip the shot type on every frame as the subject moves.

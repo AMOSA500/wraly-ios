@@ -1,5 +1,7 @@
 import AVFoundation
+import CoreImage
 import ImageIO
+import UniformTypeIdentifiers
 import Photos
 import UIKit
 import Vision
@@ -23,8 +25,11 @@ final class PhotoCaptureProcessor: NSObject, AVCapturePhotoCaptureDelegate {
     private let completion: (Int64, Result<CapturedPhoto, Error>) -> Void
     private let lock = NSLock()
 
-    init(expected: Int, completion: @escaping (Int64, Result<CapturedPhoto, Error>) -> Void) {
+    private let straighten: Double?
+
+    init(expected: Int, straighten: Double? = nil, completion: @escaping (Int64, Result<CapturedPhoto, Error>) -> Void) {
         self.expected = expected
+        self.straighten = straighten
         self.completion = completion
     }
 
@@ -43,7 +48,11 @@ final class PhotoCaptureProcessor: NSObject, AVCapturePhotoCaptureDelegate {
                 completion(id, .failure(error ?? CocoaError(.fileWriteUnknown)))
                 return
             }
-            let (best, note) = BestShotPicker.pick(frames)
+            var (best, note) = BestShotPicker.pick(frames)
+            if let roll = straighten, let level = PhotoStraightener.straighten(best, rollDegrees: roll) {
+                best = level
+                note += String(format: ", straightened %.1f°", abs(roll))
+            }
             PhotoSaver.save(best) { result in
                 switch result {
                 case .success:
@@ -138,6 +147,39 @@ enum BestShotPicker {
 
     /// Thumbnails are created with the EXIF transform applied, so they're already upright.
     static func orientation(_ data: Data) -> CGImagePropertyOrientation { .up }
+}
+
+/// Levels a photo taken with the phone slightly tilted: rotates it back and crops
+/// the corners, keeping the original metadata.
+enum PhotoStraightener {
+    private static let context = CIContext()
+
+    /// `rollDegrees`: positive = the phone was turned clockwise.
+    static func straighten(_ data: Data, rollDegrees: Double) -> Data? {
+        guard let src = CGImageSourceCreateWithData(data as CFData, nil),
+              let image = CIImage(data: data, options: [.applyOrientationProperty: true]) else { return nil }
+        // A clockwise phone turns the scene counter-clockwise; Core Image angles are counter-clockwise.
+        let filter = CIFilter(name: "CIStraightenFilter")
+        filter?.setValue(image, forKey: kCIInputImageKey)
+        filter?.setValue(-rollDegrees * .pi / 180, forKey: kCIInputAngleKey)
+        guard let out = filter?.outputImage,
+              let cg = context.createCGImage(out, from: image.extent, format: .RGBA8,
+                                             colorSpace: image.colorSpace ?? CGColorSpace(name: CGColorSpace.displayP3)!) else { return nil }
+        var props = (CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any]) ?? [:]
+        props[kCGImagePropertyOrientation] = 1   // pixels are upright now
+        props[kCGImagePropertyPixelWidth] = nil; props[kCGImagePropertyPixelHeight] = nil
+        props[kCGImageDestinationLossyCompressionQuality] = 0.92
+        if var tiff = props[kCGImagePropertyTIFFDictionary] as? [CFString: Any] {
+            tiff[kCGImagePropertyTIFFOrientation] = 1
+            props[kCGImagePropertyTIFFDictionary] = tiff
+        }
+        let type = (CGImageSourceGetType(src) as String?) ?? UTType.heic.identifier
+        let buffer = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(buffer, type as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(dest, cg, props as CFDictionary)
+        guard CGImageDestinationFinalize(dest) else { return nil }
+        return buffer as Data
+    }
 }
 
 enum PhotoSaver {

@@ -76,6 +76,8 @@ struct SettingsSheet: View {
             Form {
                 Toggle("Auto-capture when ready", isOn: $coach.autoCapture)
                 Toggle("Voice coaching", isOn: $coach.voiceEnabled)
+                Toggle("Switch lenses automatically", isOn: $coach.autoLens)
+                Toggle("Straighten tilted photos", isOn: $coach.autoStraighten)
                 NavigationLink {
                     VoicePickerView()
                 } label: {

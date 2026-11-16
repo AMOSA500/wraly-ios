@@ -12,7 +12,9 @@ public struct OrientationAdvisor: Sendable {
         let people = max(s.personCount, s.faces.count)
 
         switch mode {
-        case .scenery:
+        case .object, .scenery, .auto:
+            return []
+        case .landscape:
             guard !sideways else { return [] }
             return [Guidance("scene.sideways", .framing, .tip, .photographer,
                              "Turn the phone sideways for the view",

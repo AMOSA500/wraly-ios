@@ -313,6 +313,10 @@ public struct FrameSnapshot: Sendable {
     public var faces: [Rect2] = []
     /// Horizon and sky/land layout, for landscapes.
     public var scene: SceneLayout?
+    /// Cats and dogs Vision found.
+    public var animals: [Rect2] = []
+    /// The most eye-catching object in the frame, for focus and metering on things.
+    public var salientObject: Rect2?
 
     public init(timestamp: TimeInterval, personCount: Int, pose: BodyPose? = nil, face: FaceReading? = nil,
                 light: LightReading? = nil, background: BackgroundReading? = nil, lens: LensReading? = nil,

@@ -242,9 +242,11 @@ final class CameraService: NSObject, @unchecked Sendable {
     // MARK: Capture
 
     /// Captures `count` frames back-to-back; the processor keeps the best one.
-    func capture(plan: CapturePlan, count: Int, completion: @escaping (Result<CapturedPhoto, Error>) -> Void) {
+    /// `straighten`: the phone's roll in degrees at the shot, to level the saved photo.
+    func capture(plan: CapturePlan, count: Int, straighten: Double? = nil,
+                 completion: @escaping (Result<CapturedPhoto, Error>) -> Void) {
         sessionQueue.async { [self] in
-            let processor = PhotoCaptureProcessor(expected: max(1, count)) { [weak self] id, result in
+            let processor = PhotoCaptureProcessor(expected: max(1, count), straighten: straighten) { [weak self] id, result in
                 self?.processorsLock.withLock { self?.processors[id] = nil }
                 completion(result)
             }

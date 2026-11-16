@@ -18,6 +18,10 @@ final class FrameAnalyzer {
     private var lastMask: [Bool]?
     private var lastQuality: Double?
     private var sceneLabels: [String] = []
+    /// Label confidences smoothed over time so one odd frame doesn't change the subject.
+    private var labelScores: [String: Double] = [:]
+    private var lastAnimals: [Rect2] = []
+    private var lastSalient: Rect2?
     private var smudge = LensSmudgeEstimator()
 
     private let poseRequest = VNDetectHumanBodyPoseRequest()
@@ -30,6 +34,8 @@ final class FrameAnalyzer {
         return r
     }()
     private let classifyRequest = VNClassifyImageRequest()
+    private let animalRequest = VNRecognizeAnimalsRequest()
+    private let saliencyRequest = VNGenerateObjectnessBasedSaliencyImageRequest()
 
     func resetLensEstimate() { smudge.reset() }
 
@@ -51,9 +57,12 @@ final class FrameAnalyzer {
 
         var requests: [VNRequest] = [poseRequest, faceRequest]
         let runSegmentation = frameIndex % 2 == 0
-        let runScene = frameIndex % 30 == 1
+        // Scene labels every ~0.5 s so Auto recognises the subject quickly.
+        let runScene = frameIndex % 6 == 1
+        let runObjects = frameIndex % 3 == 0
         if runSegmentation { requests.append(segmentationRequest) }
         if runScene { requests.append(classifyRequest) }
+        if runObjects { requests += [animalRequest, saliencyRequest] }
 
         let handler = VNImageRequestHandler(cvPixelBuffer: pb, orientation: .up, options: [:])
         try? handler.perform(requests)
@@ -76,7 +85,17 @@ final class FrameAnalyzer {
             lastMask = LumaGrid.mask(from: mask, width: gridW, height: gridH)
         }
         if runScene, let results = classifyRequest.results {
-            sceneLabels = results.filter { $0.confidence > 0.3 }.prefix(6).map(\.identifier)
+            var next: [String: Double] = [:]
+            for (k, v) in labelScores { next[k] = v * 0.5 }
+            for r in results where r.confidence > 0.1 { next[r.identifier, default: 0] += Double(r.confidence) * 0.5 }
+            labelScores = next.filter { $0.value > 0.05 }
+            sceneLabels = labelScores.filter { $0.value > 0.25 }.sorted { $0.value > $1.value }.prefix(8).map(\.key)
+        }
+        if runObjects {
+            lastAnimals = (animalRequest.results ?? []).filter { $0.confidence > 0.5 }.map { Self.rect($0.boundingBox) }
+            let salient = saliencyRequest.results?.first?.salientObjects ?? []
+            lastSalient = salient.max { $0.boundingBox.width * $0.boundingBox.height < $1.boundingBox.width * $1.boundingBox.height }
+                .map { Self.rect($0.boundingBox) }
         }
 
         // ---- Pixels ----
@@ -147,6 +166,8 @@ final class FrameAnalyzer {
             attitude: attitude, camera: camera, depthDistance: nil, sun: sun)
         var snap = snapshot
         snap.faces = faces.map { Self.rect($0.boundingBox) }
+        snap.animals = lastAnimals
+        snap.salientObject = lastSalient
         if let grid {
             snap.scene = SceneLayout.analyze(luma: grid.values, width: grid.width, height: grid.height, aspect: camera.aspect)
         }

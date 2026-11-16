@@ -61,11 +61,14 @@ private struct TopBar: View {
         @Bindable var coach = coach
         HStack(alignment: .top, spacing: 8) {
             VStack(spacing: 6) {
-                Picker("Mode", selection: $coach.mode) {
-                    ForEach(CaptureMode.allCases) { Text($0.title).tag($0) }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(CaptureMode.allCases) { m in
+                            modeChip(m)
+                        }
+                    }
                 }
-                .pickerStyle(.segmented)
-                if coach.mode == .portrait {
+                if coach.state.mode == .portrait, coach.mode == .portrait || coach.mode == .auto {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 6) {
                             chip("Auto", selected: coach.targetShot == nil) { coach.targetShot = nil }
@@ -83,6 +86,22 @@ private struct TopBar: View {
             .accessibilityLabel("Settings")
         }
         .padding(.top, 4)
+    }
+
+    /// Auto shows what it recognised, e.g. "Auto · Food".
+    private func modeChip(_ m: CaptureMode) -> some View {
+        let selected = coach.mode == m
+        let title = m == .auto && selected ? "Auto · \(coach.state.subject.title)" : m.title
+        let symbol = m == .auto && selected ? coach.state.subject.symbol : m.symbol
+        return Button { coach.mode = m } label: {
+            Label(title, systemImage: symbol)
+                .font(.footnote.weight(selected ? .semibold : .regular))
+                .padding(.horizontal, 10).padding(.vertical, 6)
+                .background(selected ? Color.white : Color.white.opacity(0.12), in: Capsule())
+                .foregroundStyle(selected ? Color.black : Color.white)
+                .animation(.snappy, value: title)
+        }
+        .accessibilityLabel(m == .auto ? "Auto mode, recognised \(coach.state.subject.title)" : "\(m.title) mode")
     }
 
     private func chip(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {

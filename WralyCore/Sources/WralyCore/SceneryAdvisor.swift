@@ -2,24 +2,46 @@ import Foundation
 
 /// What the photographer is shooting.
 public enum CaptureMode: String, CaseIterable, Identifiable, Sendable {
+    /// Wraly works out what's in front of the camera and picks one of the others.
+    case auto
     /// A person is the picture (headshot … full body).
     case portrait
     /// A person small in a place — the setting matters as much as they do.
     case environmental
-    /// Landscape photography: views, cityscapes, rooms. No person needed.
+    /// Nature views: horizon, sky, land and water.
+    case landscape
+    /// Built and indoor views: cities, buildings, streets, rooms.
     case scenery
+    /// A thing: food, a pet, a flower, a product, a document.
+    case object
 
     public var id: String { rawValue }
 
     public var title: String {
         switch self {
+        case .auto: return "Auto"
         case .portrait: return "Portrait"
         case .environmental: return "Person + Place"
-        case .scenery: return "Landscape"
+        case .landscape: return "Landscape"
+        case .scenery: return "Scenery"
+        case .object: return "Object"
         }
     }
 
-    public var needsPerson: Bool { self != .scenery }
+    public var symbol: String {
+        switch self {
+        case .auto: return "sparkles"
+        case .portrait: return "person.crop.rectangle"
+        case .environmental: return "figure.walk"
+        case .landscape: return "mountain.2"
+        case .scenery: return "building.2"
+        case .object: return "cube"
+        }
+    }
+
+    public var needsPerson: Bool { self == .portrait || self == .environmental }
+    /// A view with no person: landscape or scenery.
+    public var isView: Bool { self == .landscape || self == .scenery }
 }
 
 /// Composition and handling for views: level horizon, straight verticals,
@@ -27,7 +49,8 @@ public enum CaptureMode: String, CaseIterable, Identifiable, Sendable {
 public struct SceneryAdvisor: Sendable {
     public init() {}
 
-    public func evaluate(_ s: FrameSnapshot) -> [Guidance] {
+    /// `strictVerticals`: buildings and rooms, where leaning walls are the first thing you notice.
+    public func evaluate(_ s: FrameSnapshot, strictVerticals: Bool = false) -> [Guidance] {
         var out: [Guidance] = []
 
         if let att = s.attitude {
@@ -39,7 +62,7 @@ public struct SceneryAdvisor: Sendable {
                                     cue: att.rollDegrees > 0 ? .rotateCounterClockwise : .rotateClockwise))
             }
             // Pointing up at buildings makes them lean backwards.
-            if abs(att.pitchDegrees) > 10 {
+            if abs(att.pitchDegrees) > (strictVerticals ? 5 : 10) {
                 out.append(Guidance("scene.verticals", .cameraAngle, .tip, .photographer,
                                     att.pitchDegrees > 0 ? "Hold the phone upright — buildings will lean back" : "Hold the phone upright — verticals will lean",
                                     reason: "Tilting the phone makes vertical lines converge. Keep it upright and step back or go wider to fit the top in.",
