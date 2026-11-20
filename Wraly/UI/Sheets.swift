@@ -74,20 +74,31 @@ struct SettingsSheet: View {
         @Bindable var coach = coach
         NavigationStack {
             Form {
-                Toggle("Auto-capture when ready", isOn: $coach.autoCapture)
-                Toggle("Voice coaching", isOn: $coach.voiceEnabled)
-                Toggle("Switch lenses automatically", isOn: $coach.autoLens)
-                Toggle("Straighten tilted photos", isOn: $coach.autoStraighten)
-                NavigationLink {
-                    VoicePickerView()
-                } label: {
-                    LabeledContent("Voice", value: VoicePickerView.name(for: coach.voiceIdentifier))
-                }
-                Toggle("Show skeleton", isOn: $coach.showSkeleton)
-                Toggle("Rule-of-thirds grid", isOn: $coach.showGrid)
                 Section {
-                    Text("Wraly speaks instructions meant for your subject, so you can keep your eyes on the screen. Instructions for you appear on screen.")
-                        .font(.footnote).foregroundStyle(.secondary)
+                    Toggle("Take the photo when it's ready", isOn: $coach.autoCapture)
+                    Toggle("Switch lenses automatically", isOn: $coach.autoLens)
+                    Toggle("Straighten tilted photos", isOn: $coach.autoStraighten)
+                } header: { Text("Shooting") } footer: {
+                    Text("Wraly only waits for things that would ruin the photo — closed eyes, shake, a dirty lens, someone cut off. Everything else is advice.")
+                }
+                Section {
+                    Toggle("Mirror selfies", isOn: $coach.mirrorSelfies)
+                } header: { Text("Selfie") } footer: {
+                    Text("Saves front-camera photos the way you see yourself on screen. Turn off to save them as others see you. Double-tap the viewfinder to flip cameras.")
+                }
+                Section {
+                    Toggle("Voice coaching", isOn: $coach.voiceEnabled)
+                    NavigationLink {
+                        VoicePickerView()
+                    } label: {
+                        LabeledContent("Voice", value: VoicePickerView.name(for: coach.voiceIdentifier))
+                    }
+                } header: { Text("Voice") } footer: {
+                    Text("Wraly speaks instructions meant for your subject so you can keep your eyes on the screen. In Selfie it speaks everything, so you can look at the lens.")
+                }
+                Section("Display") {
+                    Toggle("Show skeleton", isOn: $coach.showSkeleton)
+                    Toggle("Rule-of-thirds grid", isOn: $coach.showGrid)
                 }
             }
             .navigationTitle("Settings")
@@ -103,7 +114,7 @@ struct PermissionView: View {
         VStack(spacing: 18) {
             Image(systemName: "camera.aperture").font(.system(size: 64, weight: .thin))
             Text("Wraly").font(.largeTitle.weight(.bold))
-            Text("Your pocket portrait photographer. It reads the light, the background and your subject's pose, tells you exactly where to stand — then takes the shot.")
+            Text("Your pocket photographer. It reads the light, the scene and your subject — or you, in a selfie — tells you the one thing to fix, then takes the shot.")
                 .multilineTextAlignment(.center).foregroundStyle(.secondary)
             if denied {
                 Button("Allow camera in Settings") {

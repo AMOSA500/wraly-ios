@@ -45,6 +45,8 @@ public enum Cue: String, Sendable {
     case wipeLens, wait, turnAround
     /// Turn the phone sideways (landscape) or back upright.
     case turnSideways, turnUpright
+    /// Look at the camera lens rather than the screen (selfies).
+    case lookAtLens
 }
 
 public struct Guidance: Identifiable, Equatable, Sendable {

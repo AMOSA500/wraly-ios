@@ -16,7 +16,7 @@ struct GuideOverlay: View {
             ZStack {
                 if coach.showGrid { ThirdsGrid() }
                 ZStack {
-                    if coach.state.mode.needsPerson { TargetBand(shot: coach.state.shot, size: frame) }
+                    if coach.state.mode.directsSubject { TargetBand(shot: coach.state.shot, size: frame) }
                     if coach.state.mode == .landscape, let L = coach.scene, L.confidence >= 0.5 { HorizonLine(layout: L, size: frame) }
                     if coach.showSkeleton { Skeleton(joints: coach.joints, size: frame) }
                     if let box = coach.faceBox {
@@ -28,12 +28,14 @@ struct GuideOverlay: View {
                             .position(x: f.x * frame.width, y: f.y * frame.height)
                             .animation(.easeOut(duration: 0.2), value: f)
                     }
-                    if let metrics = coach.state.metrics, coach.attitude != nil, coach.state.mode.needsPerson {
+                    if let metrics = coach.state.metrics, coach.attitude != nil, coach.state.mode.directsSubject {
                         HeightRuler(metrics: metrics, shot: coach.state.shot, size: frame)
                     }
                 }
                 .frame(width: frame.width, height: frame.height)
                 .rotationEffect(.degrees(-o.degrees))
+                // The selfie preview is a mirror; analysis frames aren't.
+                .scaleEffect(x: coach.usingFrontCamera ? -1 : 1, y: 1)
                 .position(x: size.width / 2, y: size.height / 2)
                 LevelLine(attitude: coach.attitude, size: size)
             }

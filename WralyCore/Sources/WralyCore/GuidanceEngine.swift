@@ -72,6 +72,7 @@ public final class GuidanceEngine {
     private let environmental = EnvironmentalFramingAdvisor()
     private let group = GroupAdvisor()
     private let orientation = OrientationAdvisor()
+    private let selfie = SelfieAdvisor()
     private let planner = CapturePlanner()
 
     private var firstSeen: [String: TimeInterval] = [:]
@@ -94,7 +95,7 @@ public final class GuidanceEngine {
     /// it's shown and spoken, but Wraly takes the picture anyway.
     public static let mustFix: Set<String> = [
         "expr.eyesClosed", "angle.shake", "group.cutSide", "group.cutBoth", "group.headCut",
-        "frame.headroom.cropped", "env.headCut",
+        "frame.headroom.cropped", "env.headCut", "selfie.headCut", "selfie.groupCut",
     ]
 
     public static func blocksCapture(_ g: Guidance) -> Bool {
@@ -143,6 +144,22 @@ public final class GuidanceEngine {
             issues += background.evaluate(s, metrics: metrics).filter { $0.id != "bg.busy" }
             if poseRecipe == nil { issues += pose.evaluate(s, metrics: metrics, target: shot) }
 
+        case .selfie:
+            shot = stickyAutoShot(metrics?.currentShot)
+            issues = selfie.evaluate(s, metrics: metrics)
+            if s.face != nil {
+                issues += expression.evaluate(s, metrics: metrics)
+                    .filter { $0.id != "subject.none" && $0.id != "subject.group" }
+                issues += pose.evaluate(s, metrics: metrics, target: shot)
+                    .filter { SelfieAdvisor.keptPoseRules.contains($0.id) }
+            }
+            issues += lens.evaluate(s, metrics: nil, target: shot)
+                .filter { $0.category == .lens }  // only smudges: there's one front lens
+            // You're both photographer and subject: everything is said to you.
+            issues = issues.map {
+                Guidance($0.id, $0.category, $0.severity, .photographer, $0.message, reason: $0.reason, cue: $0.cue)
+            }
+
         case .portrait:
             shot = targetShot ?? stickyAutoShot(metrics?.currentShot)
             issues = expression.evaluate(s, metrics: metrics)
@@ -158,7 +175,7 @@ public final class GuidanceEngine {
             }
         }
 
-        if mode.needsPerson {
+        if mode.directsSubject {
             issues += orientation.evaluate(s, mode: mode, shot: shot)
             if s.faces.count >= 2 {
                 issues = issues.filter { !GroupAdvisor.singleSubjectRules.contains($0.id) }
@@ -175,7 +192,7 @@ public final class GuidanceEngine {
     public func update(_ s: FrameSnapshot) -> CoachState {
         let now = s.timestamp
         var (issues, metrics, shot, mode, subject) = evaluate(s)
-        let progress = mode.needsPerson ? poseMatcher.update(s, metrics: metrics) : nil
+        let progress = mode.directsSubject ? poseMatcher.update(s, metrics: metrics) : nil
         if let progress, let step = progress.nextStep, s.personCount > 0 {
             issues.append(Guidance("posegoal.\(step.id)", .pose, .fix, .subject, step.step.check.instruction(step.step.say, s),
                                    reason: "\(progress.recipe.name): \(progress.recipe.summary)"))

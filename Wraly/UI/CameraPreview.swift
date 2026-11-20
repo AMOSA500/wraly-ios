@@ -5,6 +5,8 @@ import SwiftUI
 /// normalised coordinates map 1:1 onto what the sensor (and Vision) sees.
 struct CameraPreview: UIViewRepresentable {
     let session: AVCaptureSession
+    /// Changes when the camera input is swapped; the new connection needs its rotation again.
+    var generation = 0
 
     final class PreviewUIView: UIView {
         override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }

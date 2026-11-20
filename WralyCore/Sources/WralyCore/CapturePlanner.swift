@@ -39,6 +39,7 @@ public struct CapturePlanner: Sendable {
                      mode: CaptureMode = .portrait, kind: SubjectKind? = nil) -> CapturePlan {
         if mode.isView { return sceneryPlan(for: s, night: kind == .night) }
         if mode == .object { return objectPlan(for: s, kind: kind ?? .product) }
+        if mode == .selfie { return selfiePlan(for: s) }
         var p = CapturePlan.neutral
         let f = s.camera.equivalentFocalLength
 
@@ -230,5 +231,27 @@ public struct CapturePlanner: Sendable {
         let rightmost = l.x > r.x ? l : r
         let leftmost = l.x > r.x ? r : l
         return nose.x < mid.x ? rightmost : leftmost
+    }
+
+    /// Front camera at arm's length: no stabilisation, a face that fills the frame,
+    /// and a person who blinks the moment they press the button.
+    func selfiePlan(for s: FrameSnapshot) -> CapturePlan {
+        var p = CapturePlan.neutral
+        let ev = s.light?.ev100 ?? 10
+        // One-handed and unstabilised: faster than the 1/(2·focal) rule unless it's dim.
+        let shutter = ev < 4 ? 1.0 / 60 : 1.0 / 120
+        p.maxExposureSeconds = shutter
+        p.maxISO = ev < 4 ? 2500 : 1250
+        p.notes.append("Shutter no slower than 1/\(Int((1 / shutter).rounded())) s — no stabilisation on the front camera")
+        if let face = s.face {
+            p.focusPoint = face.box.center
+            p.meteringPoint = Point2(face.box.midX, face.box.minY + face.box.height * 0.55)
+        }
+        p.notes.append("Face-priority focus and exposure")
+        // Always a short burst: keep the frame with open eyes and no shake.
+        p.burstCount = 3
+        p.notes.append("3 frames, keeping the one with your eyes open")
+        p.flash = .off
+        return p
     }
 }

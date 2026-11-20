@@ -7,7 +7,7 @@ struct PoseCard: View {
     @Binding var showPicker: Bool
 
     var body: some View {
-        if !coach.state.mode.needsPerson {
+        if !coach.state.mode.directsSubject {
             EmptyView()
         } else if let recipe = coach.poseRecipe {
             let progress = coach.state.pose?.recipe == recipe ? coach.state.pose : nil

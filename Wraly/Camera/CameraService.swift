@@ -3,8 +3,9 @@ import CoreImage
 import UIKit
 import WralyCore
 
-/// Owns the AVCaptureSession: picks the best back camera, streams portrait
-/// frames for analysis, applies Wraly's capture plan and takes photos.
+/// Owns the AVCaptureSession: picks the best back camera (or the front one for
+/// selfies), streams upright frames for analysis, applies Wraly's capture plan
+/// and takes photos.
 final class CameraService: NSObject, @unchecked Sendable {
     enum CameraError: Error { case noCamera, cannotAddInput, cannotAddOutput }
 
@@ -30,21 +31,20 @@ final class CameraService: NSObject, @unchecked Sendable {
 
     // MARK: Setup
 
+    /// Which camera is live. Written on `sessionQueue`.
+    private(set) var position: AVCaptureDevice.Position = .back
+    private var input: AVCaptureDeviceInput?
+    /// Save front-camera photos the way you saw yourself on screen.
+    var mirrorSelfies = true {
+        didSet { sessionQueue.async { self.applyConnections() } }
+    }
+
     func configure() throws {
         session.beginConfiguration()
         defer { session.commitConfiguration() }
         session.sessionPreset = .photo
 
-        // Prefer virtual multi-camera devices so zoom can switch lenses seamlessly.
-        let discovery = AVCaptureDevice.DiscoverySession(
-            deviceTypes: [.builtInTripleCamera, .builtInDualWideCamera, .builtInDualCamera, .builtInWideAngleCamera],
-            mediaType: .video, position: .back)
-        guard let device = discovery.devices.first else { throw CameraError.noCamera }
-        self.device = device
-
-        let input = try AVCaptureDeviceInput(device: device)
-        guard session.canAddInput(input) else { throw CameraError.cannotAddInput }
-        session.addInput(input)
+        try attach(.back)
 
         videoOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange]
         videoOutput.alwaysDiscardsLateVideoFrames = true
@@ -55,39 +55,101 @@ final class CameraService: NSObject, @unchecked Sendable {
         guard session.canAddOutput(photoOutput) else { throw CameraError.cannotAddOutput }
         session.addOutput(photoOutput)
         photoOutput.maxPhotoQualityPrioritization = .quality
-        if let maxDims = device.activeFormat.supportedMaxPhotoDimensions.last {
-            photoOutput.maxPhotoDimensions = maxDims
-        }
 
-        // Deliver frames and photos upright in portrait so Vision needs no orientation juggling.
-        for output in [videoOutput, photoOutput] as [AVCaptureOutput] {
-            if let c = output.connection(with: .video), c.isVideoRotationAngleSupported(90) {
-                c.videoRotationAngle = 90
-            }
-        }
-        if let c = videoOutput.connection(with: .video), c.isVideoStabilizationSupported {
-            c.preferredVideoStabilizationMode = .off // keep analysis frames geometrically true
-        }
+        applyConnections()
+        try prepareDevice()
+    }
 
+    /// Switch between the back cameras and the front (selfie) camera.
+    func switchCamera(to pos: AVCaptureDevice.Position, completion: @escaping @Sendable (Bool) -> Void) {
+        sessionQueue.async { [self] in
+            guard pos != position else { completion(true); return }
+            session.beginConfiguration()
+            var ok = true
+            do {
+                try attach(pos)
+                applyConnections()
+                try prepareDevice()
+            } catch { ok = false }
+            session.commitConfiguration()
+            lastApplied = nil
+            completion(ok)
+        }
+    }
+
+    private static func findDevice(_ pos: AVCaptureDevice.Position) -> AVCaptureDevice? {
+        // Prefer virtual multi-camera devices so zoom can switch lenses seamlessly.
+        let types: [AVCaptureDevice.DeviceType] = pos == .front
+            ? [.builtInTrueDepthCamera, .builtInWideAngleCamera]
+            : [.builtInTripleCamera, .builtInDualWideCamera, .builtInDualCamera, .builtInWideAngleCamera]
+        return AVCaptureDevice.DiscoverySession(deviceTypes: types, mediaType: .video, position: pos).devices.first
+    }
+
+    /// Swap the session's camera input. Call inside a configuration block.
+    private func attach(_ pos: AVCaptureDevice.Position) throws {
+        guard let device = Self.findDevice(pos) else { throw CameraError.noCamera }
+        let newInput = try AVCaptureDeviceInput(device: device)
+        let old = input
+        if let old { session.removeInput(old) }
+        guard session.canAddInput(newInput) else {
+            if let old { session.addInput(old) }
+            throw CameraError.cannotAddInput
+        }
+        session.addInput(newInput)
+        input = newInput
+        self.device = device
+        position = pos
         // The ultra-wide is zoom 1.0 on virtual devices; the main camera starts at the first switch-over.
+        wideZoomFactor = 1
         if device.constituentDevices.first?.deviceType == .builtInUltraWideCamera,
            let first = device.virtualDeviceSwitchOverVideoZoomFactors.first {
             wideZoomFactor = CGFloat(truncating: first)
         }
+    }
 
+    /// Rotation and mirroring for the current camera. Analysis frames are never mirrored
+    /// (so geometry stays true); selfie photos are, if you like them that way.
+    private func applyConnections() {
+        let angle = Self.rotationAngle(orientation, position: position)
+        for output in [videoOutput, photoOutput] as [AVCaptureOutput] {
+            if let c = output.connection(with: .video), c.isVideoRotationAngleSupported(angle) {
+                c.videoRotationAngle = angle
+            }
+        }
+        if let c = videoOutput.connection(with: .video) {
+            if c.isVideoStabilizationSupported { c.preferredVideoStabilizationMode = .off } // keep analysis frames geometrically true
+            if c.isVideoMirroringSupported { c.automaticallyAdjustsVideoMirroring = false; c.isVideoMirrored = false }
+        }
+        if let c = photoOutput.connection(with: .video), c.isVideoMirroringSupported {
+            c.automaticallyAdjustsVideoMirroring = false
+            c.isVideoMirrored = position == .front && mirrorSelfies
+        }
+    }
+
+    private func prepareDevice() throws {
+        guard let device else { throw CameraError.noCamera }
+        if let maxDims = device.activeFormat.supportedMaxPhotoDimensions.last {
+            photoOutput.maxPhotoDimensions = maxDims
+        }
         try device.lockForConfiguration()
-        // Wraly drives focus/exposure to the eye itself.
-        device.automaticallyAdjustsFaceDrivenAutoFocusEnabled = false
-        device.isFaceDrivenAutoFocusEnabled = false
-        device.automaticallyAdjustsFaceDrivenAutoExposureEnabled = false
-        device.isFaceDrivenAutoExposureEnabled = false
+        defer { device.unlockForConfiguration() }
+        // Back: Wraly drives focus/exposure to the eye itself.
+        // Front: the face fills the frame, so the camera's own face priority is the right call.
+        let front = position == .front
+        device.automaticallyAdjustsFaceDrivenAutoFocusEnabled = front
+        device.automaticallyAdjustsFaceDrivenAutoExposureEnabled = front
+        if !front {
+            device.isFaceDrivenAutoFocusEnabled = false
+            device.isFaceDrivenAutoExposureEnabled = false
+        }
         if device.isFocusModeSupported(.continuousAutoFocus) { device.focusMode = .continuousAutoFocus }
         if device.isSmoothAutoFocusSupported { device.isSmoothAutoFocusEnabled = false }
         device.isSubjectAreaChangeMonitoringEnabled = true
         if device.isLowLightBoostSupported { device.automaticallyEnablesLowLightBoostWhenAvailable = true }
+        if device.isExposureModeSupported(.continuousAutoExposure) { device.exposureMode = .continuousAutoExposure }
+        device.setExposureTargetBias(0, completionHandler: nil)
         // Start on the main 1× lens — never default a portrait to the ultra-wide.
         device.videoZoomFactor = wideZoomFactor
-        device.unlockForConfiguration()
     }
 
     /// Rotate analysis frames and photos so they come out upright for the way the phone is held.
@@ -95,23 +157,16 @@ final class CameraService: NSObject, @unchecked Sendable {
     func setOrientation(_ o: FrameOrientation) {
         guard o != orientation else { return }
         orientation = o
-        let angle = Self.rotationAngle(o)
-        let outputs: [AVCaptureOutput] = [videoOutput, photoOutput]
-        sessionQueue.async {
-            for output in outputs {
-                if let c = output.connection(with: .video), c.isVideoRotationAngleSupported(angle) {
-                    c.videoRotationAngle = angle
-                }
-            }
-        }
+        sessionQueue.async { self.applyConnections() }
     }
 
-    /// The sensor's natural orientation is landscape with the phone's top on the left.
-    static func rotationAngle(_ o: FrameOrientation) -> CGFloat {
+    /// The back sensor's natural orientation is landscape with the phone's top on the left.
+    /// The front sensor faces the other way, so its sideways angles are swapped.
+    static func rotationAngle(_ o: FrameOrientation, position: AVCaptureDevice.Position = .back) -> CGFloat {
         switch o {
         case .portrait: return 90
-        case .landscapeCounterClockwise: return 0
-        case .landscapeClockwise: return 180
+        case .landscapeCounterClockwise: return position == .front ? 180 : 0
+        case .landscapeClockwise: return position == .front ? 0 : 180
         }
     }
 
@@ -186,11 +241,13 @@ final class CameraService: NSObject, @unchecked Sendable {
             guard let device, (try? device.lockForConfiguration()) != nil else { return }
             defer { device.unlockForConfiguration() }
 
-            if let p = plan.focusPoint, device.isFocusPointOfInterestSupported {
+            // The front camera keeps its own face-priority focus and exposure.
+            let front = position == .front
+            if !front, let p = plan.focusPoint, device.isFocusPointOfInterestSupported {
                 device.focusPointOfInterest = Self.devicePoint(p, o)
                 if device.isFocusModeSupported(.continuousAutoFocus) { device.focusMode = .continuousAutoFocus }
             }
-            if let p = plan.meteringPoint, device.isExposurePointOfInterestSupported {
+            if !front, let p = plan.meteringPoint, device.isExposurePointOfInterestSupported {
                 device.exposurePointOfInterest = Self.devicePoint(p, o)
             }
             if device.isExposureModeSupported(.continuousAutoExposure) {

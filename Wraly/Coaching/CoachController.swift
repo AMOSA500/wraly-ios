@@ -23,6 +23,15 @@ final class CoachController {
     var isCapturing = false
     var countdown: Int?
     var errorMessage: String?
+    /// The front camera is live (selfie mode).
+    private(set) var usingFrontCamera = false
+    /// True while the camera is being swapped, to blur the preview.
+    private(set) var isSwitchingCamera = false
+    /// Bumped whenever the camera input changes, so the preview re-applies its rotation.
+    private(set) var cameraGeneration = 0
+    /// Bumped on every shutter press and every saved photo, for flash and haptics.
+    private(set) var shutterCount = 0
+    private(set) var photoCount = 0
 
     // MARK: Settings
     /// nil = Auto (coach whatever shot you're framing).
@@ -30,13 +39,58 @@ final class CoachController {
         didSet { let t = targetShot; analysisQueue { $0.engine.targetShot = t; $0.engine.reset() } }
     }
     var autoCapture = true
-    /// Portrait, person in a place, or scenery.
+    /// What's being shot. Selfie runs on the front camera; every other mode on the back.
     var mode: CaptureMode = .auto {
         didSet {
             guard mode != oldValue else { return }
+            if !oldValue.usesFrontCamera { lastBackMode = oldValue }
             let m = mode
             analysisQueue { $0.engine.mode = m; $0.engine.reset() }
             voice.clear()
+            // Taking your own photo: hear everything, since you can't watch the screen and the lens.
+            voice.speakPhotographerCues = m == .selfie
+            if m.usesFrontCamera != usingFrontCamera { switchCamera(front: m.usesFrontCamera) }
+        }
+    }
+    /// The mode to return to when leaving selfie.
+    @ObservationIgnored private var lastBackMode: CaptureMode = .auto
+
+    /// Front ↔ back, like the Camera app's flip button.
+    func flipCamera() {
+        mode = mode.usesFrontCamera ? lastBackMode : .selfie
+    }
+
+    /// Next or previous mode (swipe on the viewfinder).
+    func shiftMode(_ step: Int) {
+        let all = CaptureMode.allCases
+        guard let i = all.firstIndex(of: mode) else { return }
+        mode = all[min(max(i + step, 0), all.count - 1)]
+    }
+
+    private func switchCamera(front: Bool) {
+        guard started else { return }
+        isSwitchingCamera = true
+        usingFrontCamera = front
+        cameraService.switchCamera(to: front ? .front : .back) { ok in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if !ok {
+                    self.usingFrontCamera.toggle()
+                    self.errorMessage = front ? "The front camera isn't available." : "The back camera isn't available."
+                }
+                self.cameraGeneration += 1
+                self.analysisQueue { $0.analyzer.resetLensEstimate(); $0.engine.reset() }
+                try? await Task.sleep(for: .milliseconds(250))
+                self.isSwitchingCamera = false
+            }
+        }
+    }
+
+    /// Save selfies the way you saw yourself on screen (like the Camera app's "Mirror Front Camera").
+    var mirrorSelfies: Bool = UserDefaults.standard.object(forKey: "mirrorSelfies") as? Bool ?? true {
+        didSet {
+            cameraService.mirrorSelfies = mirrorSelfies
+            UserDefaults.standard.set(mirrorSelfies, forKey: "mirrorSelfies")
         }
     }
     /// Recommend poses and confirm the subject is in them before shooting.
@@ -110,6 +164,7 @@ final class CoachController {
             errorMessage = "Camera unavailable: \(error.localizedDescription)"
             return
         }
+        cameraService.mirrorSelfies = mirrorSelfies
         sensors.start()
         voice.voiceIdentifier = voiceIdentifier
         voice.rate = voiceRate
@@ -156,10 +211,10 @@ final class CoachController {
         camera = info
         exposureReadout = readout
         voice.announce(coach.primary)
-        autoSwitchLens(coach.plan.suggestedZoom)
+        if !usingFrontCamera { autoSwitchLens(coach.plan.suggestedZoom) }
 
         // Keep the pose suited to the shot being framed.
-        if poseGuide, coach.mode.needsPerson, let r = poseRecipe, !r.shots.contains(coach.shot) {
+        if poseGuide, coach.mode.directsSubject, let r = poseRecipe, !r.shots.contains(coach.shot) {
             poseRecipe = PoseLibrary.recommended(for: coach.shot).first
         }
         let matched = coach.pose?.matched ?? false
@@ -172,7 +227,7 @@ final class CoachController {
         if coach.readyToCapture && !wasReady && coach.pose == nil { voice.ready() }
         wasReady = coach.readyToCapture
 
-        if autoCapture, coach.readyToCapture, !isCapturing, countdown == nil,
+        if autoCapture, coach.readyToCapture, !isCapturing, !isSwitchingCamera, countdown == nil,
            Date().timeIntervalSince(lastCaptureAt) > 4 {
             beginAutoCapture()
         }
@@ -192,22 +247,27 @@ final class CoachController {
     }
 
     func capture() {
-        guard !isCapturing else { return }
+        guard !isCapturing, !isSwitchingCamera else { return }
         isCapturing = true
+        shutterCount += 1
         lastCaptureAt = Date()
         let plan = state.plan
         // Small accidental tilts are fixed in the photo; bigger ones are probably on purpose.
         let roll = attitude?.rollDegrees ?? 0
-        let straighten = autoStraighten && abs(roll) >= 0.4 && abs(roll) <= 8 ? roll : nil
+        // Selfie tilts are usually on purpose, so leave those alone.
+        let straighten = autoStraighten && !usingFrontCamera && abs(roll) >= 0.4 && abs(roll) <= 8 ? roll : nil
         cameraService.capture(plan: plan, count: plan.burstCount, straighten: straighten) { [weak self] result in
             Task { @MainActor in
                 guard let self else { return }
                 self.isCapturing = false
                 switch result {
                 case .success(let photo):
-                    self.lastPhoto = photo
+                    withAnimation(.spring(duration: 0.35)) {
+                        self.lastPhoto = photo
+                        self.photoCount += 1
+                    }
                     self.voice.say("Got it")
-                    if self.poseGuide, self.autoNextPose, self.state.mode.needsPerson { self.advancePoseAfterShot() }
+                    if self.poseGuide, self.autoNextPose, self.state.mode.directsSubject { self.advancePoseAfterShot() }
                 case .failure(let error):
                     self.errorMessage = "Couldn't save photo: \(error.localizedDescription)"
                 }

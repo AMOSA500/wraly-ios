@@ -6,6 +6,8 @@ public enum CaptureMode: String, CaseIterable, Identifiable, Sendable {
     case auto
     /// A person is the picture (headshot … full body).
     case portrait
+    /// You, on the front camera: Wraly coaches you directly.
+    case selfie
     /// A person small in a place — the setting matters as much as they do.
     case environmental
     /// Nature views: horizon, sky, land and water.
@@ -21,6 +23,7 @@ public enum CaptureMode: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .auto: return "Auto"
         case .portrait: return "Portrait"
+        case .selfie: return "Selfie"
         case .environmental: return "Person + Place"
         case .landscape: return "Landscape"
         case .scenery: return "Scenery"
@@ -32,6 +35,7 @@ public enum CaptureMode: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .auto: return "sparkles"
         case .portrait: return "person.crop.rectangle"
+        case .selfie: return "person.crop.circle"
         case .environmental: return "figure.walk"
         case .landscape: return "mountain.2"
         case .scenery: return "building.2"
@@ -39,7 +43,11 @@ public enum CaptureMode: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    public var needsPerson: Bool { self == .portrait || self == .environmental }
+    public var needsPerson: Bool { self == .portrait || self == .environmental || self == .selfie }
+    /// Shot on the front camera.
+    public var usesFrontCamera: Bool { self == .selfie }
+    /// Someone else is being photographed (so there's a subject to direct).
+    public var directsSubject: Bool { self == .portrait || self == .environmental }
     /// A view with no person: landscape or scenery.
     public var isView: Bool { self == .landscape || self == .scenery }
 }
