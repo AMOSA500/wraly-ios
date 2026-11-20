@@ -34,6 +34,8 @@ final class CameraService: NSObject, @unchecked Sendable {
     /// Which camera is live. Written on `sessionQueue`.
     private(set) var position: AVCaptureDevice.Position = .back
     private var input: AVCaptureDeviceInput?
+    /// Play the shutter sound (once per photo, never for the extra burst frames).
+    var shutterSound = false
     /// Save front-camera photos the way you saw yourself on screen.
     var mirrorSelfies = true {
         didSet { sessionQueue.async { self.applyConnections() } }
@@ -324,6 +326,10 @@ final class CameraService: NSObject, @unchecked Sendable {
             settings = AVCapturePhotoSettings()
         }
         settings.maxPhotoDimensions = photoOutput.maxPhotoDimensions
+        // One click at most: the burst frames after the first are always silent.
+        if #available(iOS 18.0, *), photoOutput.isShutterSoundSuppressionSupported {
+            settings.isShutterSoundSuppressionEnabled = !(first && shutterSound)
+        }
         settings.photoQualityPrioritization = .quality
         // Flash only on the first frame of a burst (it can't recycle fast enough).
         if plan.flash == .fill, first, photoOutput.supportedFlashModes.contains(.on) {

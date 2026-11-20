@@ -26,6 +26,8 @@ public struct CapturePlan: Equatable, Sendable {
     public var burstCount: Int
     /// Explanations shown in the settings HUD.
     public var notes: [String]
+    /// A photographer's name for the shot, e.g. "Golden-hour portrait".
+    public var recipe: String = ""
 
     public static let neutral = CapturePlan(exposureBias: 0, maxExposureSeconds: 1.0 / 125, maxISO: 1600,
                                             flash: .off, whiteBalance: .auto, focusPoint: nil,
@@ -36,7 +38,17 @@ public struct CapturePlanner: Sendable {
     public init() {}
 
     public func plan(for s: FrameSnapshot, metrics m: SubjectMetrics?, target shot: ShotType,
-                     mode: CaptureMode = .portrait, kind: SubjectKind? = nil) -> CapturePlan {
+                     mode: CaptureMode = .portrait, kind: SubjectKind? = nil,
+                     surroundings: [Surrounding]? = nil) -> CapturePlan {
+        let around = surroundings ?? SurroundingsReader.read(s)
+        var p = basePlan(for: s, metrics: m, target: shot, mode: mode, kind: kind)
+        adjust(&p, for: around, s: s, mode: mode)
+        p.recipe = SurroundingsReader.recipe(kind ?? (mode.needsPerson ? .person : .landscape), around, mode: mode)
+        return p
+    }
+
+    private func basePlan(for s: FrameSnapshot, metrics m: SubjectMetrics?, target shot: ShotType,
+                          mode: CaptureMode, kind: SubjectKind?) -> CapturePlan {
         if mode.isView { return sceneryPlan(for: s, night: kind == .night) }
         if mode == .object { return objectPlan(for: s, kind: kind ?? .product) }
         if mode == .selfie { return selfiePlan(for: s) }
@@ -74,11 +86,6 @@ public struct CapturePlanner: Sendable {
         if let stops = s.light?.backlightStops, stops > 1 {
             bias += min((stops - 1) * 0.5, 1.3)
             p.notes.append(String(format: "Backlight: +%.1f EV for the face", bias))
-        }
-        let labels = Set(s.background?.sceneLabels ?? [])
-        if !labels.isDisjoint(with: ["snow", "beach"]) {
-            bias += 0.7
-            p.notes.append("Snow/sand fools the meter: +0.7 EV")
         }
         if let clipped = s.face?.clippedFraction, clipped > 0.06 {
             bias -= 0.7
@@ -146,10 +153,6 @@ public struct CapturePlanner: Sendable {
         if let clipped = s.light?.clippedHighlights, clipped > 0.06 {
             bias -= 0.7
             p.notes.append("Bright sky: −0.7 EV to keep cloud detail")
-        }
-        if !Set(s.background?.sceneLabels ?? []).isDisjoint(with: ["snow", "beach"]) {
-            bias += 0.7
-            p.notes.append("Snow/sand fools the meter: +0.7 EV")
         }
         if night {
             bias -= 0.3

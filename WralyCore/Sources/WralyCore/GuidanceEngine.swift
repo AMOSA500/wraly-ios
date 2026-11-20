@@ -19,6 +19,8 @@ public struct CoachState: Equatable, Sendable {
     public var mode: CaptureMode = .portrait
     /// What Wraly thinks it's looking at.
     public var subject: SubjectKind = .person
+    /// The setting and light around it, strongest first.
+    public var surroundings: [Surrounding] = []
 
     public static let empty = CoachState(primary: nil, all: [], readiness: 0, readyToCapture: false,
                                          metrics: nil, plan: .neutral, shot: .halfBody)
@@ -227,10 +229,11 @@ public final class GuidanceEngine {
         // Choose the single instruction to show.
         let primary = choosePrimary(established, now: now)
 
-        let plan = planner.plan(for: s, metrics: metrics, target: shot, mode: mode, kind: subject)
+        let around = SurroundingsReader.read(s)
+        let plan = planner.plan(for: s, metrics: metrics, target: shot, mode: mode, kind: subject, surroundings: around)
         return CoachState(primary: primary, all: established, readiness: readiness,
                           readyToCapture: ready, metrics: metrics, plan: plan, shot: shot, pose: progress,
-                          mode: mode, subject: subject)
+                          mode: mode, subject: subject, surroundings: around)
     }
 
     private func choosePrimary(_ issues: [Guidance], now: TimeInterval) -> Guidance? {

@@ -16,6 +16,9 @@ final class CoachController {
     var faceBox: Rect2?
     /// Detected horizon, for the Landscape overlay.
     var scene: SceneLayout?
+    /// Other things Wraly found, for the on-screen tags.
+    var animals: [Rect2] = []
+    var salientObject: Rect2?
     var attitude: DeviceAttitude?
     var camera = CameraInfo(equivalentFocalLength: 26, verticalFOV: 69, horizontalFOV: 54)
     var exposureReadout = ""
@@ -86,6 +89,14 @@ final class CoachController {
         }
     }
 
+    /// Off = silent shutter (the screen blinks and the phone taps instead), where the region allows it.
+    var shutterSound: Bool = UserDefaults.standard.bool(forKey: "shutterSound") {
+        didSet {
+            cameraService.shutterSound = shutterSound
+            UserDefaults.standard.set(shutterSound, forKey: "shutterSound")
+        }
+    }
+
     /// Save selfies the way you saw yourself on screen (like the Camera app's "Mirror Front Camera").
     var mirrorSelfies: Bool = UserDefaults.standard.object(forKey: "mirrorSelfies") as? Bool ?? true {
         didSet {
@@ -145,6 +156,45 @@ final class CoachController {
     @ObservationIgnored private var lastManualZoomAt = Date.distantPast
     @ObservationIgnored private var lastAutoZoomAt = Date.distantPast
     @ObservationIgnored private var zoomSuggestion: (zoom: Double, since: Date)?
+    /// What the frame looked like at the last auto shot. Auto-capture waits for something
+    /// new — the subject moves, you re-aim, or it stops being ready for a moment — so it
+    /// doesn't keep shooting the same picture.
+    @ObservationIgnored private var lastShotLook: ShotLook?
+    @ObservationIgnored private var notReadySince: Date?
+
+    struct ShotLook {
+        var subject: SubjectKind
+        var mode: CaptureMode
+        var face: Point2?
+        var pitch: Double
+        var heading: Double?
+
+        func differs(from o: ShotLook) -> Bool {
+            if subject != o.subject || mode != o.mode { return true }
+            if (face == nil) != (o.face == nil) { return true }
+            if let a = face, let b = o.face, a.distance(to: b) > 0.12 { return true }
+            if abs(pitch - o.pitch) > 10 { return true }
+            if let a = heading, let b = o.heading {
+                let d = abs(a - b).truncatingRemainder(dividingBy: 360)
+                if min(d, 360 - d) > 20 { return true }
+            }
+            return false
+        }
+    }
+
+    private func look(_ coach: CoachState) -> ShotLook {
+        ShotLook(subject: coach.subject, mode: coach.mode, face: faceBox?.center,
+                 pitch: attitude?.pitchDegrees ?? 0, heading: attitude?.headingDegrees)
+    }
+
+    /// True when this frame is a new picture worth taking automatically.
+    private func isNewPicture(_ coach: CoachState) -> Bool {
+        guard let last = lastShotLook else { return true }
+        if look(coach).differs(from: last) { return true }
+        // Stepping out of "ready" for a while (a new pose, someone walked in) re-arms it too.
+        if let since = notReadySince, Date().timeIntervalSince(since) > 1.5 { return true }
+        return false
+    }
 
     func start() async {
         guard !started else { return }
@@ -165,6 +215,7 @@ final class CoachController {
             return
         }
         cameraService.mirrorSelfies = mirrorSelfies
+        cameraService.shutterSound = shutterSound
         sensors.start()
         voice.voiceIdentifier = voiceIdentifier
         voice.rate = voiceRate
@@ -207,6 +258,8 @@ final class CoachController {
         joints = out.joints
         faceBox = out.faceBox
         scene = out.snapshot.scene
+        animals = out.snapshot.animals
+        salientObject = out.snapshot.salientObject
         attitude = out.snapshot.attitude
         camera = info
         exposureReadout = readout
@@ -224,11 +277,18 @@ final class CoachController {
         }
         poseWasMatched = matched
 
-        if coach.readyToCapture && !wasReady && coach.pose == nil { voice.ready() }
+        let fresh = isNewPicture(coach)
+        if coach.readyToCapture && !wasReady && coach.pose == nil && fresh { voice.ready() }
         wasReady = coach.readyToCapture
+        if coach.readyToCapture {
+            if fresh { lastShotLook = nil }   // re-armed: remember that until the next shot
+            notReadySince = nil
+        } else if notReadySince == nil {
+            notReadySince = Date()
+        }
 
         if autoCapture, coach.readyToCapture, !isCapturing, !isSwitchingCamera, countdown == nil,
-           Date().timeIntervalSince(lastCaptureAt) > 4 {
+           Date().timeIntervalSince(lastCaptureAt) > 3, fresh {
             beginAutoCapture()
         }
     }
@@ -242,7 +302,11 @@ final class CoachController {
             try? await Task.sleep(for: .milliseconds(600))
             countdown = nil
             // Re-check: the moment may have passed (blink, step).
-            if state.readyToCapture { capture() }
+            if state.readyToCapture {
+                lastShotLook = look(state)
+                notReadySince = nil
+                capture()
+            }
         }
     }
 

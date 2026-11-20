@@ -111,10 +111,7 @@ private struct FaceMarker: View {
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.white.opacity(0.6), lineWidth: 1)
-                .frame(width: box.width * size.width, height: box.height * size.height)
-                .position(x: box.midX * size.width, y: box.midY * size.height)
+            // The face itself is bracketed by SceneTags.
             if let f = focus {
                 Image(systemName: "plus.viewfinder")
                     .font(.system(size: 18, weight: .light))

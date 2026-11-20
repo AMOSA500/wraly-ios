@@ -76,3 +76,39 @@ final class AutoModeTests: XCTestCase {
         XCTAssertTrue(landscape.contains("scene.sideways"))
     }
 }
+
+final class SurroundingsTests: XCTestCase {
+    private func person(labels: [String], ev: Double = 12, kelvin: Double = 5500) -> FrameSnapshot {
+        var s = Fixture.snapshot(Fixture.person(top: 0.1, head: 0.2),
+                                 light: LightReading(ev100: ev, iso: 100, exposureSeconds: 1.0 / 250, aperture: 1.8,
+                                                     meanLuma: 0.45, clippedHighlights: 0, crushedShadows: 0))
+        s.light?.colorTemperatureK = kelvin
+        s.background = BackgroundReading(clutter: 0, mergerBehindHead: false, brightEdgeDistraction: false,
+                                         backgroundSharpnessRatio: nil, sceneLabels: labels)
+        return s
+    }
+
+    func testPersonOnTheBeachGetsBeachSettings() {
+        let s = person(labels: ["beach", "sky"])
+        XCTAssertEqual(SurroundingsReader.read(s).first, .beach)
+        let plan = CapturePlanner().plan(for: s, metrics: SubjectMetrics(snapshot: s), target: .halfBody, kind: .person)
+        XCTAssertEqual(plan.exposureBias, 0.7, accuracy: 0.01)
+        XCTAssertEqual(plan.recipe, "Portrait at the beach")
+    }
+
+    func testConcertProtectsHighlightsAndFreezes() {
+        let s = person(labels: ["concert"], ev: 5)
+        let plan = CapturePlanner().plan(for: s, metrics: SubjectMetrics(snapshot: s), target: .halfBody, kind: .person)
+        XCTAssertLessThan(plan.exposureBias, 0)
+        XCTAssertLessThanOrEqual(plan.maxExposureSeconds, 1.0 / 125)
+        XCTAssertEqual(plan.recipe, "Portrait under stage lights")
+    }
+
+    func testNightIsNamedAndBursts() {
+        let s = person(labels: [], ev: 1.5)
+        let state = GuidanceEngine().update(s)
+        XCTAssertEqual(state.surroundings.first, .night)
+        XCTAssertEqual(state.plan.recipe, "Night portrait")
+        XCTAssertGreaterThanOrEqual(state.plan.burstCount, 3)
+    }
+}

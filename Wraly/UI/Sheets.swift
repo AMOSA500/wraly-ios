@@ -7,8 +7,28 @@ struct DetailsSheet: View {
     @Environment(CoachController.self) private var coach
 
     var body: some View {
+        @Bindable var coach = coach
         NavigationStack {
             List {
+                Section("What Wraly sees") {
+                    row("Shot", coach.state.plan.recipe)
+                    if !coach.state.surroundings.isEmpty {
+                        HStack(spacing: 6) {
+                            ForEach(coach.state.surroundings, id: \.self) { s in
+                                Label(s.title, systemImage: s.symbol)
+                                    .font(.caption.weight(.semibold))
+                                    .padding(.horizontal, 8).padding(.vertical, 4)
+                                    .background(Color.secondary.opacity(0.18), in: Capsule())
+                            }
+                        }
+                    }
+                    if coach.state.mode == .portrait {
+                        Picker("Framing", selection: $coach.targetShot) {
+                            Text("Auto").tag(ShotType?.none)
+                            ForEach(ShotType.allCases) { Text($0.title).tag(ShotType?.some($0)) }
+                        }
+                    }
+                }
                 Section("Subject") {
                     row("Shot", coach.state.shot.title)
                     if let m = coach.state.metrics {
@@ -80,6 +100,11 @@ struct SettingsSheet: View {
                     Toggle("Straighten tilted photos", isOn: $coach.autoStraighten)
                 } header: { Text("Shooting") } footer: {
                     Text("Wraly only waits for things that would ruin the photo — closed eyes, shake, a dirty lens, someone cut off. Everything else is advice.")
+                }
+                Section {
+                    Toggle("Shutter sound", isOn: $coach.shutterSound)
+                } footer: {
+                    Text("Off, the screen blinks and the phone taps instead. Burst frames are always silent. Some regions always play the sound.")
                 }
                 Section {
                     Toggle("Mirror selfies", isOn: $coach.mirrorSelfies)
