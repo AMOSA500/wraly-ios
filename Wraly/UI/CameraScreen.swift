@@ -31,7 +31,7 @@ struct CameraScreen: View {
                     .padding(.top, 8)
                 Spacer(minLength: 0)
                 ModeDial()
-                    .frame(height: 54)
+                    .frame(height: 58)
                 BottomBar()
                     .padding(.bottom, 8)
             }
@@ -383,33 +383,71 @@ private struct ModeDial: View {
     @Environment(CoachController.self) private var coach
     @GestureState private var drag: CGFloat = 0
 
-    private let radius: CGFloat = 420
-    private let step: Double = 9   // degrees between modes
+    private let radius: CGFloat = 360
+    private let gap: CGFloat = 26          // arc length between two names
+    private static let font: UIFont = {
+        let base = UIFont.systemFont(ofSize: 12, weight: .bold)
+        return UIFont(descriptor: base.fontDescriptor.withDesign(.rounded) ?? base.fontDescriptor, size: 12)
+    }()
+    private static let kerning: CGFloat = 1.4
+
+    /// Each name measured letter by letter, so the names can be bent along the
+    /// circle and spaced by their real width: they never touch.
+    private struct DialName { let mode: CaptureMode; let chars: [(String, CGFloat, CGFloat)]; let width: CGFloat }
+    private static let labels: [DialName] = CaptureMode.allCases.map { m in
+        var x: CGFloat = 0
+        let chars: [(String, CGFloat, CGFloat)] = m.title.uppercased().map { c in
+            let s = String(c)
+            let w = (s as NSString).size(withAttributes: [.font: font]).width + kerning
+            defer { x += w }
+            return (s, x + w / 2, w)
+        }
+        return DialName(mode: m, chars: chars, width: x - kerning)
+    }
+    /// Centre of each name, as a distance along the arc.
+    private static func centres(gap: CGFloat) -> [CGFloat] {
+        var out: [CGFloat] = [], x: CGFloat = 0
+        for l in labels { out.append(x + l.width / 2); x += l.width + gap }
+        return out
+    }
 
     var body: some View {
         GeometryReader { geo in
-            let modes = CaptureMode.allCases
-            let selected = Double(modes.firstIndex(of: coach.mode) ?? 0)
-            let turned = selected - Double(drag / (radius * step * .pi / 180))
-            let cx = geo.size.width / 2, cy = radius + 14
+            let centres = Self.centres(gap: gap)
+            let selected = CaptureMode.allCases.firstIndex(of: coach.mode) ?? 0
+            let cx = geo.size.width / 2, cy = radius + 16
+            let half = geo.size.width / 2
             ZStack {
-                // The selected notch.
-                Capsule().fill(.yellow).frame(width: 4, height: 4).position(x: cx, y: 4)
-                ForEach(Array(modes.enumerated()), id: \.element) { i, m in
-                    let offset = Double(i) - turned
-                    let a = (-90 + offset * step) * .pi / 180
-                    let on = m == coach.mode && drag == 0
-                    Text(m.title.uppercased())
-                        .font(.system(size: on ? 13 : 11, weight: on ? .bold : .semibold, design: .rounded))
-                        .kerning(1)
-                        .foregroundStyle(on ? Color.yellow : .white.opacity(0.75))
-                        .fixedSize()
-                        .rotationEffect(.radians(a + .pi / 2))
-                        .position(x: cx + radius * cos(a), y: cy + radius * sin(a))
-                        .opacity(max(0, 1 - abs(offset) / 3.2))
-                        .onTapGesture { withAnimation(.snappy) { coach.mode = m } }
-                        .accessibilityLabel("\(m.title) mode")
-                        .accessibilityAddTraits(m == coach.mode ? [.isButton, .isSelected] : .isButton)
+                // The notch marking the chosen mode.
+                Circle().fill(.yellow).frame(width: 5, height: 5).position(x: cx, y: 4)
+                ForEach(Array(Self.labels.enumerated()), id: \.element.mode) { i, label in
+                    let s = centres[i] - centres[selected] + drag
+                    let on = i == selected && drag == 0
+                    let fade = max(0, 1 - max(0, abs(s) - 30) / max(half - 20, 1))
+                    ZStack {
+                        ForEach(Array(label.chars.enumerated()), id: \.offset) { _, ch in
+                            let a = -Double.pi / 2 + Double(s - label.width / 2 + ch.1) / Double(radius)
+                            Text(ch.0)
+                                .font(Font(Self.font))
+                                .foregroundStyle(on ? Color.yellow : .white.opacity(0.8))
+                                .fixedSize()
+                                .rotationEffect(.radians(a + .pi / 2))
+                                .position(x: cx + radius * cos(a), y: cy + radius * sin(a))
+                        }
+                        // A tap target the size of the whole name.
+                        let a = -Double.pi / 2 + Double(s) / Double(radius)
+                        Color.clear
+                            .frame(width: label.width + gap * 0.8, height: 30)
+                            .contentShape(Rectangle())
+                            .rotationEffect(.radians(a + .pi / 2))
+                            .position(x: cx + radius * cos(a), y: cy + radius * sin(a))
+                            .onTapGesture { withAnimation(.snappy) { coach.mode = label.mode } }
+                    }
+                    .opacity(fade)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("\(label.mode.title) mode")
+                    .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
+                    .accessibilityAction { coach.mode = label.mode }
                 }
             }
             .contentShape(Rectangle())
@@ -417,13 +455,15 @@ private struct ModeDial: View {
                 DragGesture(minimumDistance: 8)
                     .updating($drag) { v, s, _ in s = v.translation.width }
                     .onEnded { v in
-                        let moved = Int((-v.translation.width / (radius * step * .pi / 180)).rounded())
-                        withAnimation(.snappy) { coach.shiftMode(moved) }
+                        // Land on the name closest to the notch.
+                        let target = centres[selected] - v.translation.width
+                        let nearest = centres.indices.min { abs(centres[$0] - target) < abs(centres[$1] - target) } ?? selected
+                        withAnimation(.snappy) { coach.shiftMode(nearest - selected) }
                     }
             )
             .animation(.snappy, value: coach.mode)
         }
-        .mask(LinearGradient(colors: [.clear, .black, .black, .clear], startPoint: .leading, endPoint: .trailing))
+        .mask(LinearGradient(colors: [.clear, .black, .black, .black, .clear], startPoint: .leading, endPoint: .trailing))
     }
 }
 
